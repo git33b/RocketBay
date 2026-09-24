@@ -198,13 +198,13 @@
   </div>
 
   <script src="pad-config.js?v=pad3"></script>
-  <script src="liftoff.js?v=liftoff41"></script>
+  <script src="liftoff.js?v=liftoff45"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "compose4";
     const PAD_VER = "pad1";
-    const APP_VER = "liftoff41";
+    const APP_VER = "liftoff45";
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
@@ -396,7 +396,7 @@
         left = Math.min(0, Math.max(cw - dw, left));
         top = (ch - dh) / 2;
       }
-      return { left, top, width: dw, height: dh, scale, nw, nh, cw, ch, cover: true };
+      return { left: Math.round(left), top: Math.round(top), width: Math.round(dw), height: Math.round(dh), scale, nw, nh, cw, ch, cover: true };
     }
     // Back-compat alias
     function letterboxRect() { return plateMap(); }
@@ -405,10 +405,10 @@
     function applyPlateMap() {
       const lb = plateMap();
       if (!lb) return null;
-      plate.style.left = lb.left + "px";
-      plate.style.top = lb.top + "px";
-      plate.style.width = lb.width + "px";
-      plate.style.height = lb.height + "px";
+      plate.style.left = Math.round(lb.left) + "px";
+      plate.style.top = Math.round(lb.top) + "px";
+      plate.style.width = Math.round(lb.width) + "px";
+      plate.style.height = Math.round(lb.height) + "px";
       return lb;
     }
     window.applyPlateMap = applyPlateMap;
@@ -674,10 +674,10 @@
         const totalH = lb.height + head;
         stackEl.width = Math.round(lb.width * dpr);
         stackEl.height = Math.round(totalH * dpr);
-        stackEl.style.left = lb.left + "px";
-        stackEl.style.top = (lb.top - head) + "px";
-        stackEl.style.width = lb.width + "px";
-        stackEl.style.height = totalH + "px";
+        stackEl.style.left = Math.round(lb.left) + "px";
+        stackEl.style.top = Math.round(lb.top - head) + "px";
+        stackEl.style.width = Math.round(lb.width) + "px";
+        stackEl.style.height = Math.round(totalH) + "px";
         if (state.phase !== "liftoff") {
           stackEl.style.transform = "";
           stackEl.style.opacity = "1";
