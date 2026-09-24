@@ -1445,9 +1445,10 @@
       // landscape follow: plume scales with the rocket's on-screen height so the >=150 px of
       // room below the nozzle actually carries plume (it widens with altitude below)
       const rocketCss = (seat.stackH || seat.targetH || 480) * (lb.height / lb.nh) * zf;
-      lenBase = Math.max(lenBase, rocketCss * (0.45 + 0.4 * u));
+      lenBase = Math.max(lenBase, rocketCss * (0.8 + 0.35 * u));
     }
-    const lenCss = lenBase * flick;
+    const longMode = lenBase > hullW * lenRatio + 1;
+    const lenCss = lenBase * (longMode ? 1 + (flick - 1) * 0.4 : flick);
     const seedHalf = Math.round(hullW * 0.34 * (1 + 0.25 * u));
     // Plume widens with altitude (lower ambient pressure): per-row horizontal stretch at blit
     const expand = 1.2 + 1.5 * u;
@@ -1456,7 +1457,7 @@
     const field = this._ensureFireField(fw, fh);
     const rows = Math.min(fh, visRows, Math.ceil(lenCss * 1.2));
     // long landscape plume: slower cooling so the narrow modular hull still burns the full length
-    const cool = lenBase > hullW * lenRatio + 1 ? clamp((hullW * lenRatio * 0.5) / lenBase, 0.2, 1) : 1;
+    const cool = lenBase > hullW * lenRatio + 1 ? clamp((hullW * lenRatio * 0.5) / lenBase, 0.15, 1) : 1;
     this._tickFire(field, { seedHalf: cool < 1 ? Math.round(seedHalf * 1.4) : seedHalf, heat: 36, len: lenCss, rows: rows, expand: 1, cool: cool });
     this._paintFireBuf(field, pal);
     const ar = Math.max(1, field.activeRows || rows);
