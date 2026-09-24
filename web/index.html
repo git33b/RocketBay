@@ -19,57 +19,47 @@
       display: flex; align-items: center; justify-content: center;
       background: #000;
     }
-    #plateWrap {
-      position: relative; width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center;
-    }
     #plate {
       width: 100%; height: 100%;
       object-fit: contain; object-position: center;
       background: #000; display: block;
     }
+    #skyExt {
+      position: absolute; inset: 0; pointer-events: none; z-index: 0;
+      opacity: 0; transition: none;
+    }
+    #world {
+      position: absolute; inset: 0; z-index: 1;
+      will-change: transform;
+      transform: translate3d(0,0,0);
+    }
+    #plateWrap {
+      position: relative; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+    }
     #stack {
       position: absolute; pointer-events: none;
-      image-rendering: auto;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
       display: none;
       transform-origin: 50% 100%;
-      /* never translucent / blended — flames may keep screen */
       opacity: 1;
       mix-blend-mode: normal;
+      will-change: transform;
     }
     #stack.on { display: block; }
-    #stack.liftoff {
-      transition: transform 2.1s cubic-bezier(0.33, 0, 0.67, 1), opacity 0.4s 1.6s;
-      transform: translateY(-118%);
-      opacity: 0;
+    #fxCanvas {
+      position: absolute; pointer-events: none;
+      display: none; z-index: 2;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
-    #fx {
-      position: absolute; inset: 0; pointer-events: none;
-      display: none; align-items: flex-end; justify-content: center;
-    }
-    #fx.on { display: flex; }
-    #flames {
-      width: min(28vw, 180px); height: min(40vh, 260px);
-      margin-bottom: 8%;
-      background:
-        radial-gradient(ellipse at 50% 0%, #fff 0%, #ffe566 18%, #ff8c00 45%, #ff3b00 70%, transparent 78%),
-        radial-gradient(ellipse at 35% 10%, #ffcc66 0%, transparent 55%),
-        radial-gradient(ellipse at 65% 10%, #ffaa33 0%, transparent 55%);
-      filter: blur(1px);
-      animation: roar 0.12s infinite alternate;
-      opacity: 0.95;
-      mix-blend-mode: screen;
-    }
-    @keyframes roar {
-      from { transform: scaleY(0.92) scaleX(0.96) translateY(4px); opacity: 0.85; }
-      to { transform: scaleY(1.08) scaleX(1.04) translateY(-6px); opacity: 1; }
-    }
-    #plateWrap.shake { animation: shake 0.45s linear infinite; }
-    @keyframes shake {
-      0%, 100% { transform: translate(0,0); }
-      25% { transform: translate(-3px, 2px); }
-      50% { transform: translate(3px, -2px); }
-      75% { transform: translate(-2px, -1px); }
+    #countdownHud {
+      position: absolute; inset: 0; z-index: 5; pointer-events: none;
+      display: none; align-items: center; justify-content: center;
+      font-size: clamp(42px, 12vw, 96px); font-weight: 900;
+      letter-spacing: 0.08em; color: #fff;
+      text-shadow: 0 0 12px rgba(255,140,0,.85), 0 2px 0 #000;
     }
     #hud {
       position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 10px; right: 10px;
@@ -131,17 +121,25 @@
     }
     #meta { text-align: center; font-size: 10px; opacity: .8; letter-spacing: .03em; }
     #todRow button { min-width: 64px; }
+    #soundBtn { min-width: 72px; font-size: 10px; }
+    #soundBtn.on { background: rgba(0,180,220,.55); }
+    #launchBtn.holding { background: rgba(255,80,0,.95); transform: scale(0.98); }
+    #ops .op.big { font-size: 12px; padding: 8px 14px; }
   </style>
 </head>
 <body>
   <div id="stage">
-    <div id="plateWrap">
-      <img id="plate" alt="Rocket Bay pad" draggable="false" />
-      <canvas id="stack" width="1" height="1" aria-hidden="true"></canvas>
-      <div id="fx"><div id="flames"></div></div>
-      <div id="hud">
-        <div class="pill" id="stackHud">Select parts</div>
-        <div class="pill" id="phaseHud">ASSEMBLE</div>
+    <div id="skyExt" aria-hidden="true"></div>
+    <div id="world">
+      <div id="plateWrap">
+        <img id="plate" alt="Rocket Bay pad" draggable="false" />
+        <canvas id="stack" width="1" height="1" aria-hidden="true"></canvas>
+        <canvas id="fxCanvas" width="1" height="1" aria-hidden="true"></canvas>
+        <div id="countdownHud" aria-live="polite"></div>
+        <div id="hud">
+          <div class="pill" id="stackHud">Select parts</div>
+          <div class="pill" id="phaseHud">ASSEMBLE</div>
+        </div>
       </div>
     </div>
   </div>
@@ -155,6 +153,7 @@
       <div id="cards"></div>
       <div class="row">
         <button type="button" class="ghost" id="clearBtn">CLEAR</button>
+        <button type="button" class="ghost" id="soundBtn" title="Rumble audio (muted by default)">SOUND OFF</button>
         <button type="button" class="primary" id="launchBtn" disabled>GO FOR LAUNCH</button>
       </div>
     </div>
@@ -175,12 +174,14 @@
     </div>
   </div>
 
+  <script src="liftoff.js?v=liftoff2"></script>
   <script>
     const NATIVE_W = 1280, NATIVE_H = 720;
     const SIT_Y = 548, TARGET_H = 500;
     const CX = { "02": 556, "03": 685, "04": 717, "05": 634 };
     const KIT_VER = "compose4";
     const PAD_VER = "compose4";
+    const APP_VER = "liftoff2";
 
     const TODS = [
       { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
@@ -228,7 +229,10 @@
     const plate = document.getElementById("plate");
     const plateWrap = document.getElementById("plateWrap");
     const stackEl = document.getElementById("stack");
-    const fx = document.getElementById("fx");
+    const worldEl = document.getElementById("world");
+    const skyExt = document.getElementById("skyExt");
+    const fxCanvas = document.getElementById("fxCanvas");
+    const countdownHud = document.getElementById("countdownHud");
     const meta = document.getElementById("meta");
     const todRow = document.getElementById("todRow");
     const tabs = document.getElementById("tabs");
@@ -402,6 +406,35 @@
       return { dx: Math.round(dx), dy: Math.round(dy), dw: Math.round(dw), dh: Math.round(dh), bb, scale };
     }
 
+    /** Last composed seat in native plate coords — used by liftoff plume. */
+    let lastSeat = { cx: 640, sitY: SIT_Y, width: 120, nozzles: [0], nw: NATIVE_W, nh: NATIVE_H };
+
+    function computeNozzles(width, boostId) {
+      // Offsets from stack CX in native px
+      if (boostId === "gridfin-booster") {
+        const side = Math.round(width * 0.38);
+        return [-side, 0, side];
+      }
+      if (boostId === "steel-booster") {
+        const s = Math.round(width * 0.22);
+        return [-s, 0, s];
+      }
+      return [0];
+    }
+
+    function noteSeat(drawInfo, cx, sitY, boostId) {
+      const w = Math.max(40, drawInfo.dw || 120);
+      lastSeat = {
+        cx: cx,
+        sitY: sitY,
+        width: w,
+        nozzles: computeNozzles(w, boostId),
+        nw: NATIVE_W,
+        nh: NATIVE_H,
+      };
+      return drawInfo;
+    }
+
     let composeToken = 0;
 
     function clearStackOverlay() {
@@ -454,7 +487,7 @@
         try { pre = await getPart("steel-booster-ship"); } catch (_) {}
         if (token !== composeToken) return null;
         if (pre) {
-          drawSeated(ctx, pre, cx, sitY, targetH);
+          noteSeat(drawSeated(ctx, pre, cx, sitY, targetH), cx, sitY, "steel-booster");
           return off;
         }
         const booster = await getPart("steel-booster");
@@ -480,7 +513,7 @@
         sctx.globalAlpha = 1;
         sctx.drawImage(booster, bbb.x0, bbb.y0, bbb.cw, bbb.ch, (cw - bw) / 2, targetH - bh, bw, bh);
         sctx.drawImage(ship, sbb.x0, sbb.y0, sbb.cw, sbb.ch, (cw - sw) / 2, 0, sw, sh);
-        drawSeated(ctx, tmp, cx, sitY, targetH);
+        noteSeat(drawSeated(ctx, tmp, cx, sitY, targetH), cx, sitY, "steel-booster");
         return off;
       }
 
@@ -522,19 +555,19 @@
           gctx.scale(-1, 1);
           gctx.drawImage(side, sbb.x0, sbb.y0, sbb.cw, sbb.ch, 0, targetH - sh, sw, sh);
           gctx.restore();
-          drawSeated(ctx, g, cx, sitY, targetH);
+          noteSeat(drawSeated(ctx, g, cx, sitY, targetH), cx, sitY, "gridfin-booster");
           return off;
         }
 
         // No side sprite or no s1: draw gridfin / core seated
         const gf = coreId === "gridfin-booster" ? core : await getPart("gridfin-booster");
         if (token !== composeToken) return null;
-        drawSeated(ctx, gf, cx, sitY, targetH);
+        noteSeat(drawSeated(ctx, gf, cx, sitY, targetH), cx, sitY, boost?.id || "gridfin-booster");
         return off;
       }
 
       // Plain core (Moon Giant / Pencil Core / etc.)
-      drawSeated(ctx, core, cx, sitY, targetH);
+      noteSeat(drawSeated(ctx, core, cx, sitY, targetH), cx, sitY, boost?.id || null);
       return off;
     }
 
@@ -571,31 +604,19 @@
         stackEl.style.top = lb.top + "px";
         stackEl.style.width = lb.width + "px";
         stackEl.style.height = lb.height + "px";
-        stackEl.style.transform = "";
-        stackEl.style.opacity = "1";
+        // Don't clobber rAF-driven liftoff translate
+        if (state.phase !== "liftoff") {
+          stackEl.style.transform = "";
+          stackEl.style.opacity = "1";
+        }
         stackEl.style.display = "block";
         stackEl.classList.add("on");
-        if (state.phase !== "liftoff") stackEl.classList.remove("liftoff");
 
         const ctx = stackEl.getContext("2d");
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.globalAlpha = 1;
         ctx.clearRect(0, 0, lb.width, lb.height);
         ctx.drawImage(composed, 0, 0, lb.width, lb.height);
-
-        if (state.phase === "liftoff") {
-          const tod = TODS[state.todIndex].id;
-          const cx = CX[tod];
-          const flameX = lb.left + (cx / lb.nw) * lb.width;
-          const flameY = lb.top + (SIT_Y / lb.nh) * lb.height;
-          fx.style.alignItems = "flex-start";
-          fx.style.justifyContent = "flex-start";
-          const flames = document.getElementById("flames");
-          flames.style.position = "absolute";
-          flames.style.left = (flameX - flames.offsetWidth / 2) + "px";
-          flames.style.top = (flameY - 8) + "px";
-          flames.style.marginBottom = "0";
-        }
       } catch (e) {
         console.warn("compose failed", e);
       }
@@ -645,8 +666,6 @@
       opsEl.classList.toggle("on", p === "grounded" || p === "liftoff");
       missionBox.classList.toggle("on", p === "mission");
       outcomeBox.classList.toggle("on", p === "outcome");
-      fx.classList.toggle("on", p === "liftoff");
-      plateWrap.classList.toggle("shake", p === "liftoff");
       phaseHud.textContent = p.toUpperCase();
       stackHud.textContent = stackSummary();
       launchBtn.disabled = !canLaunch();
@@ -690,27 +709,82 @@
 
     async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+    const soundBtn = document.getElementById("soundBtn");
+    let liftoffEngine = null;
+    let lastPerf = null;
+
+    function getLiftoff() {
+      if (liftoffEngine) return liftoffEngine;
+      const API = window.RocketBayLiftoff;
+      if (!API) { console.warn("liftoff.js missing"); return null; }
+      liftoffEngine = new API.LiftoffEngine({
+        getLetterbox: () => letterboxRect(),
+        getSeat: () => {
+          const tod = TODS[state.todIndex].id;
+          return Object.assign({}, lastSeat, { cx: CX[tod], sitY: SIT_Y });
+        },
+        getTodId: () => TODS[state.todIndex].id,
+        getWorldEl: () => worldEl,
+        getSkyEl: () => skyExt,
+        getFxCanvas: () => fxCanvas,
+        getCountdownEl: () => countdownHud,
+        getStackEl: () => stackEl,
+        onComplete: () => {
+          state.phase = "mission";
+          clearStackOverlay();
+          if (liftoffEngine) {
+            // keep lingering particles cleared on mission plate change
+            liftoffEngine.reset();
+          }
+          render();
+        },
+        onPerfSample: (samples) => { lastPerf = samples; window.__liftoffPerf = samples; },
+      });
+      return liftoffEngine;
+    }
+
+    soundBtn.onclick = () => {
+      const eng = getLiftoff();
+      const currentlyMuted = soundBtn.textContent.indexOf("OFF") >= 0;
+      const muted = !currentlyMuted; // toggle
+      soundBtn.textContent = muted ? "SOUND OFF" : "SOUND ON";
+      soundBtn.classList.toggle("on", !muted);
+      if (eng) {
+        eng.ensureAudio();
+        if (eng.audio && eng.audio.ctx.state === "suspended") eng.audio.ctx.resume().catch(() => {});
+        eng.setMuted(muted);
+      }
+    };
+
     launchBtn.onclick = async () => {
       if (!canLaunch() || state.phase !== "assemble") return;
+      // Light pad-ops, then heavy countdown+liftoff
       state.phase = "grounded";
+      assembleUI.style.display = "none";
       render();
       renderOps(0);
-      for (let i = 0; i < 4; i++) {
-        renderOps(i);
-        await sleep(550);
-      }
-      renderOps(4);
-      await sleep(350);
+      await sleep(280);
+      renderOps(1);
+      await sleep(280);
+      renderOps(2);
+      await sleep(280);
+      renderOps(3);
+      await sleep(200);
+
       state.phase = "liftoff";
-      render();
-      requestAnimationFrame(() => {
-        stackEl.classList.add("liftoff");
-      });
-      await sleep(2200);
-      state.phase = "mission";
-      stackEl.classList.remove("liftoff");
-      clearStackOverlay();
-      render();
+      setChrome();
+      meta.textContent = `${TODS[state.todIndex].id} ${TODS[state.todIndex].label} · LIFTOFF · live compose`;
+      // Ensure stack painted before engine starts
+      await paintStack();
+      const eng = getLiftoff();
+      if (!eng) {
+        state.phase = "mission";
+        render();
+        return;
+      }
+      // Sync mute from button
+      eng.audioMuted = soundBtn.textContent.indexOf("OFF") >= 0;
+      eng.start();
     };
 
     function finishMission(choice) {
@@ -730,6 +804,7 @@
     document.getElementById("deployBtn").onclick = () => finishMission("deploy");
     document.getElementById("exploreBtn").onclick = () => finishMission("explore");
     document.getElementById("restartBtn").onclick = () => {
+      if (liftoffEngine) liftoffEngine.reset();
       state.phase = "assemble";
       state.missionChoice = null;
       state.selected = {
@@ -740,6 +815,10 @@
       };
       state.todIndex = todFromHour(new Date().getHours());
       clearStackOverlay();
+      worldEl.style.transform = "";
+      skyExt.style.opacity = "0";
+      countdownHud.style.display = "none";
+      fxCanvas.style.display = "none";
       render();
     };
 
