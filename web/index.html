@@ -125,7 +125,27 @@
       border: 2px solid transparent; text-align: center; display: flex; flex-direction: column; align-items: center;
     }
     .card.selected { border-color: var(--cyan); background: rgba(0,200,224,.22); }
-    .card.blocked { opacity: .42; filter: grayscale(1); }
+    .card.blocked { opacity: .42; filter: grayscale(1); cursor: help; }
+    #trayWrap { position: relative; }
+    #trayWrap::before, #trayWrap::after {
+      content: ""; position: absolute; top: 0; bottom: 4px; width: 34px; pointer-events: none; z-index: 2;
+      opacity: 0; transition: opacity .2s;
+    }
+    #trayWrap::before { left: 0; background: linear-gradient(to right, rgba(8,12,20,.95), rgba(8,12,20,0)); }
+    #trayWrap::after { right: 0; background: linear-gradient(to left, rgba(8,12,20,.95), rgba(8,12,20,0)); }
+    #trayWrap.moreL::before, #trayWrap.moreR::after { opacity: 1; }
+    .trayArrow {
+      position: absolute; top: 50%; transform: translateY(-60%); z-index: 3; width: 24px; height: 40px; padding: 0;
+      border-radius: 12px; border: 0; background: rgba(0,200,224,.85); color: #041018; font-size: 20px; line-height: 38px;
+      font-weight: 700; display: none; box-shadow: 0 0 8px rgba(0,0,0,.5);
+    }
+    .trayArrow.left { left: 2px; } .trayArrow.right { right: 2px; }
+    #trayWrap.moreL .trayArrow.left, #trayWrap.moreR .trayArrow.right { display: block; }
+    #buildLabel {
+      position: fixed; left: calc(6px + env(safe-area-inset-left)); top: calc(4px + env(safe-area-inset-top)); z-index: 40;
+      font: 700 9px/1 ui-monospace, Menlo, monospace; letter-spacing: .5px; color: rgba(255,255,255,.72);
+      background: rgba(0,0,0,.35); padding: 3px 5px; border-radius: 4px; pointer-events: none;
+    }
     .card.blocked::after {
       content: "\2715"; position: absolute; top: 2px; right: 4px; font-size: 10px; color: #ff8a7a;
     }
@@ -137,7 +157,7 @@
     .card.wide { width: 104px; }
     .card .name { font-size: 9px; margin-top: 3px; line-height: 1.1; font-weight: 700; max-height: 22px; overflow: hidden; }
     #reason {
-      height: 26px; font-size: 10px; line-height: 13px; text-align: center; opacity: .92;
+      height: 26px; font-size: 11px; line-height: 13px; text-align: center; opacity: .95;
       overflow: hidden; display: flex; align-items: center; justify-content: center;
     }
     #reason.warn { color: #ffb4a6; }
@@ -193,13 +213,18 @@
     </div>
   </div>
 
+  <div id="buildLabel" aria-hidden="true"></div>
   <div id="chrome">
     <div id="meta"></div>
     <div class="row" id="todRow"></div>
 
     <div id="assembleUI">
       <div id="steps" role="tablist"></div>
-      <div id="tray" aria-label="Pieces"></div>
+      <div id="trayWrap">
+        <div id="tray" aria-label="Pieces"></div>
+        <button type="button" class="trayArrow left" id="trayL" aria-label="Scroll pieces left">&#8249;</button>
+        <button type="button" class="trayArrow right" id="trayR" aria-label="Scroll pieces right">&#8250;</button>
+      </div>
       <div id="reason" aria-live="polite"></div>
       <div class="row" id="actRow">
         <button type="button" class="ghost" id="undoBtn">UNDO</button>
@@ -226,14 +251,14 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=modular1"></script>
-  <script src="liftoff.js?v=liftoff51"></script>
+  <script src="modular.js?v=modular2"></script>
+  <script src="liftoff.js?v=modular2"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
-    const KIT_VER = "modular1";
+    const KIT_VER = "modular2";
     const PAD_VER = "pad5";
-    const APP_VER = "liftoff51";
+    const APP_VER = "modular2";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -273,6 +298,12 @@
     const plate = $("plate"), plateWrap = $("plateWrap"), stackEl = $("stack"), worldEl = $("world");
     const skyExt = $("skyExt"), fxCanvas = $("fxCanvas"), countdownHud = $("countdownHud");
     const meta = $("meta"), todRow = $("todRow"), stepsEl = $("steps"), trayEl = $("tray"), reasonEl = $("reason");
+    // tray scroll affordance (edge fades + arrows when more pieces are off-screen)
+    trayEl.addEventListener("scroll", () => updateTrayHint(), { passive: true });
+    window.addEventListener("resize", () => updateTrayHint());
+    $("trayL").addEventListener("click", () => trayEl.scrollBy({ left: -Math.round(trayEl.clientWidth * 0.7), behavior: "smooth" }));
+    $("trayR").addEventListener("click", () => trayEl.scrollBy({ left: Math.round(trayEl.clientWidth * 0.7), behavior: "smooth" }));
+    $("buildLabel").textContent = APP_VER;
     const launchBtn = $("launchBtn"), assembleUI = $("assembleUI"), opsEl = $("ops"), chromeEl = $("chrome");
     const missionBox = $("missionBox"), outcomeBox = $("outcomeBox"), stackHud = $("stackHud"), phaseHud = $("phaseHud");
 
@@ -404,6 +435,12 @@
       if (slot === "payload") return "sides";
       return "sides";
     }
+    function updateTrayHint() {
+      const w = document.getElementById("trayWrap"); if (!w) return;
+      const t = trayEl, max = t.scrollWidth - t.clientWidth;
+      w.classList.toggle("moreL", max > 2 && t.scrollLeft > 2);
+      w.classList.toggle("moreR", max > 2 && t.scrollLeft < max - 2);
+    }
     function setReason(txt, cls) { reasonEl.textContent = txt || ""; reasonEl.className = cls || ""; }
     function summaryLine() {
       const b = state.build;
@@ -454,7 +491,7 @@
         el.type = "button";
         el.className = "card" + (c.imgs.length > 1 ? " wide" : "") + (isSelected(state.step, c.id) ? " selected" : "") + (why ? " blocked" : "");
         el.dataset.id = c.id;
-        el.setAttribute("aria-disabled", why ? "true" : "false");
+        if (why) { el.dataset.blocked = "1"; el.title = why.plain; el.setAttribute("aria-label", `${c.label} \u2014 unavailable: ${why.plain}`); }
         const img = c.imgs.length
           ? (c.imgs.length === 1 ? `<img alt="" src="${c.imgs[0]}" />`
              : `<div style="display:flex;gap:2px;height:44px;width:68px;justify-content:center;background:rgba(0,0,0,.28);border-radius:4px">${c.imgs.map((s) => `<img alt="" src="${s}" style="width:30px;background:none" />`).join("")}</div>`)
@@ -467,6 +504,7 @@
         });
         trayEl.appendChild(el);
       });
+      requestAnimationFrame(updateTrayHint);
       if (state.swapSlot) setReason(`Swap ${state.swapSlot === "sides" ? "side boosters" : lbl(state.build[state.swapSlot])}: pick a replacement`, "ok");
       else setReason(summaryLine(), isComplete(b) ? "ok" : "");
       $("undoBtn").disabled = !state.history.length;
@@ -530,23 +568,28 @@
       const core = st.layers[0];
       const edgeMid = (id, lay) => lay.x + MB.edgeRowMid(KIT.pieces[id], false);
       const coreMid = seat.left + edgeMid(b.s1, core);
-      const nozzles = [coreMid - cfg.cx], scales = [1];
+      // every nozzle is anchored to its OWN piece bottom (dy vs the stack foot, native px)
+      const nozzles = [coreMid - cfg.cx], scales = [1], nozzleDy = [core.y + core.h - st.h];
       const coreW = KIT.metas[b.s1].joinBottomWidth;
       st.layers.forEach((Ly) => {
         if (Ly.kind !== "side") return;
         nozzles.push(seat.left + edgeMid(Ly.name, Ly) - cfg.cx);
-        scales.push(Math.max(0.34, KIT.metas[Ly.name].joinBottomWidth / coreW));
+        nozzleDy.push(Ly.y + Ly.h - st.h);
+        scales.push(Math.max(0.3, KIT.metas[Ly.name].joinBottomWidth / coreW));
       });
+      // with strap-ons, the core flame is sized to its own nozzle row (no 1.3x hull spread) so
+      // each booster's flame stays visible beside it on every core width
+      if (nozzles.length > 1) scales[0] = 1 / 1.3;
       let bx0 = 1e9, bx1 = -1;
       for (let x = 0; x < st.w; x++) if (lit[((st.h - 1) * st.w + x) * 4 + 3]) { bx0 = Math.min(bx0, x); bx1 = x; }
       lastSeat = {
         cx: cfg.cx, sitY: cfg.sitY, deckY: cfg.deckY, nozzleY: cfg.sitY, smokeY: cfg.smokeOriginY,
-        width: Math.max(40, bx1 - bx0 + 1), nozzles, nozzleScales: scales, hullW: coreW,
+        width: Math.max(40, bx1 - bx0 + 1), nozzles, nozzleScales: scales, nozzleDy, hullW: coreW,
         stackH: st.h, tipY: seat.top, nw: NATIVE_W, nh: NATIVE_H, targetH: st.h,
       };
       rocket = { left: seat.left, top: seat.top, w: st.w, h: st.h, owner: st.owner, slotIdx, staticCv, movingCv, shadowCv, shadowRect,
         anim: anim.size ? { t0: performance.now(), set: anim } : null, outline: null, outlineSlot: null, ids: idsOf(b), sides: b.sides, layers: st.layers, joins: st.joins };
-      window.__modularState = { build: Object.assign({}, b), stackH: st.h, stackW: st.w, seat, joins: st.joins, layers: st.layers, nozzles, scales, tipY: seat.top };
+      window.__modularState = { build: Object.assign({}, b), stackH: st.h, stackW: st.w, seat, joins: st.joins, layers: st.layers, nozzles, scales, nozzleDy, tipY: seat.top };
       if (rocket.anim) requestAnimationFrame(animTick); else paintStack();
     }
     function outlineFor(slot) {

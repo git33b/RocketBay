@@ -7,7 +7,7 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "liftoff51";
+  const BUILD = "modular2";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
@@ -408,7 +408,14 @@
           for (let x = 0; x < nw; x += 4) { const i = (yy * nw + x) * 4; r.push(pd[i]); g.push(pd[i + 1]); b.push(pd[i + 2]); }
           col.push([med(r), med(g), med(b)]);
         }
-        this._skyCol = col;
+        // vertical box blur (r=18 rows) -> painted cloud streaks don't turn into gradient bands
+        const R = 18, sm = [];
+        for (let yy = 0; yy < col.length; yy++) {
+          let r = 0, g = 0, b2 = 0, n = 0;
+          for (let k = -R; k <= R; k++) { const q = col[Math.max(0, Math.min(col.length - 1, yy + k))]; r += q[0]; g += q[1]; b2 += q[2]; n++; }
+          sm.push([r / n, g / n, b2 / n]);
+        }
+        this._skyCol = sm;
       } catch (e) { this._skyCol = null; }
     } else { this._skyTopRgb = null; this._skyRows = null; }
 
@@ -1117,7 +1124,7 @@
       const isSide = ni > 0;
       const scaleN = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
       const nx = nz.x + nozzles[ni];
-      const css = this.cssFromNative(nx, nz.y);
+      const css = this.cssFromNative(nx, nz.y + (seat.nozzleDy && seat.nozzleDy[ni] ? seat.nozzleDy[ni] : 0));
       const bx = css.x * bs;
       const by = css.y * bs;
       const cols = Math.max(5, Math.round(wF * scaleN / lb.nw * lb.width * bs));
@@ -1499,7 +1506,7 @@
       lenBase = Math.max(lenBase, rocketCss * (0.8 + 0.35 * u));
       // once zoomed out, the plume always runs past the frame bottom (>=170 px room carries flame)
       const zw = clamp((1 - zf) / 0.15, 0, 1);
-      if (zw > 0) lenBase = Math.max(lenBase, visRows * (1 + 0.35 * zw));
+      if (zw > 0) lenBase = Math.max(lenBase, visRows * (1 + 0.6 * zw));
     }
     const longMode = lenBase > hullW * lenRatio + 1;
     const lenCss = lenBase * (longMode ? 1 + (flick - 1) * 0.4 : flick);
@@ -1511,7 +1518,7 @@
     const field = this._ensureFireField(fw, fh);
     const rows = Math.min(fh, visRows, Math.ceil(lenCss * 1.2));
     // long landscape plume: slower cooling so the narrow modular hull still burns the full length
-    const cool = lenBase > hullW * lenRatio + 1 ? clamp((hullW * lenRatio * 0.5) / lenBase, 0.15, 1) : 1;
+    const cool = lenBase > hullW * lenRatio + 1 ? clamp((hullW * lenRatio * 0.5) / lenBase, 0.08, 1) : 1;
     this._tickFire(field, { seedHalf: cool < 1 ? Math.round(seedHalf * 1.1) : seedHalf, heat: cool < 1 ? 40 : 36, len: lenCss, rows: rows, expand: 1, cool: cool });
     this._paintFireBuf(field, pal);
     const ar = Math.max(1, field.activeRows || rows);
@@ -1523,9 +1530,12 @@
     for (let ni = 0; ni < nozzles.length; ni++) {
       const isSide = ni > 0;
       const sc = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
-      const cw0 = this.cssFromNative(nz.x + nozzles[ni], nz.y);
+      const ndy = seat.nozzleDy && seat.nozzleDy[ni] ? seat.nozzleDy[ni] : 0;
+      const cw0 = this.cssFromNative(nz.x + nozzles[ni], nz.y + ndy);
       const css = this._w2s(cw0.x, cw0.y);
-      ctx.globalAlpha = isSide ? 0.92 : 1;
+      ctx.globalAlpha = 1;
+      // side flames: own width, but a long plume of their own (not a scaled-down stub)
+      const sy = isSide ? Math.max(sc, 0.72) : 1;
       const x0c = css.x, y0c = Math.round(css.y);
       const BAND = 2;
       for (let y = 0; y < ar; y += BAND) {
@@ -1534,7 +1544,7 @@
         const dw = Math.round(field.w * sc * wsc);
         const bh = Math.min(BAND, ar - y);
         ctx.drawImage(field.canvas, 0, y, field.w, bh,
-          Math.round(x0c - dw / 2), y0c + Math.round(y * sc), dw, Math.max(1, Math.round((y + bh) * sc) - Math.round(y * sc)));
+          Math.round(x0c - dw / 2), y0c + Math.round(y * sy), dw, Math.max(1, Math.round((y + bh) * sy) - Math.round(y * sy)));
       }
     }
 
@@ -1717,7 +1727,7 @@
     }
     {
       const band = 4;
-      const f0 = clean * 0.2, f1 = clean * 0.5 + 6; // opaque before the mirror fold (N)
+      const f0 = clean * 0.2, f1 = Math.min(clean * 0.5, 128) + 6; // opaque before the mirror fold (N)
       const Nr = this._skyRowsN || 128;
       for (let y = 0; y < H; y += band) {
         const aboveN = (lb.top - (y + band - cy) / zA) / scaleY; // extension row (native) at this screen row
@@ -1865,16 +1875,16 @@
       let zAllowed = 1;
       if (landscape) {
         const clean = this._tallSkyClean || 256;
-        const opaqueLocal = lb.top - (clean * 0.5 + 6) * scaleY;
+        const opaqueLocal = lb.top - (Math.min(clean * 0.5, 128) + 6) * scaleY; // = drawAltSky f1
         const D = opaqueLocal - noseLocal;
         const tgtL = wrapH * NOSE_FRAC_LAND;
         const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
-        if (D > 1 && blendOk) zAllowed = clamp((wrapH + 24 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
+        if (D > 1 && blendOk) zAllowed = clamp((wrapH + 8 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
       }
       {
-        // Critically damped spring toward the allowed zoom (~1.2 s settle, C1: velocity starts
+        // Critically damped spring toward the allowed zoom (~0.6 s settle, C1: velocity starts
         // at 0 -> no jerk). A lagging spring on a falling bound stays above it -> plate never shows.
-        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = 4.2;
+        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = 8.4; // ~0.6 s settle
         let zs = this._zoomS || 1, vz = this._zoomV || 0;
         const acc = W * W * (zAllowed - zs) - 2 * W * vz;
         vz += acc * dtz; zs += vz * dtz;
