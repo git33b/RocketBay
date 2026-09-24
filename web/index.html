@@ -179,8 +179,8 @@
     const NATIVE_W = 1280, NATIVE_H = 720;
     const SIT_Y = 548, TARGET_H = 500;
     const CX = { "02": 556, "03": 685, "04": 717, "05": 634 };
-    const KIT_VER = "compose2";
-    const PAD_VER = "compose2";
+    const KIT_VER = "compose4";
+    const PAD_VER = "compose4";
 
     const TODS = [
       { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
@@ -345,7 +345,7 @@
       return { left, top, width: dw, height: dh, scale, nw, nh };
     }
 
-    /** Opaque-alpha content bbox of an Image/canvas (source pixels). */
+    /** Opaque-alpha content bbox; feet = densest bottom row (ignore sparse fringe). */
     function contentBBox(img) {
       const w = img.naturalWidth || img.width;
       const h = img.naturalHeight || img.height;
@@ -357,18 +357,32 @@
       let data;
       try { data = ctx.getImageData(0, 0, w, h).data; }
       catch { return { x0: 0, y0: 0, x1: w - 1, y1: h - 1, cw: w, ch: h }; }
+      const rowCounts = new Array(h).fill(0);
       let x0 = w, y0 = h, x1 = -1, y1 = -1;
       for (let y = 0; y < h; y++) {
+        let cnt = 0;
         for (let x = 0; x < w; x++) {
           if (data[(y * w + x) * 4 + 3] > 8) {
+            cnt++;
             if (x < x0) x0 = x;
-            if (y < y0) y0 = y;
             if (x > x1) x1 = x;
-            if (y > y1) y1 = y;
+            if (y < y0) y0 = y;
           }
         }
+        rowCounts[y] = cnt;
       }
       if (x1 < 0) return { x0: 0, y0: 0, x1: w - 1, y1: h - 1, cw: w, ch: h };
+      // Find max row count in lower half; walk up from bottom until row has >= 25% of that
+      let maxLower = 0;
+      for (let y = Math.floor(h * 0.45); y < h; y++) if (rowCounts[y] > maxLower) maxLower = rowCounts[y];
+      const thr = Math.max(4, Math.floor(maxLower * 0.25));
+      y1 = h - 1;
+      while (y1 > y0 && rowCounts[y1] < thr) y1--;
+      // trim sparse top fringe similarly
+      let maxUpper = 0;
+      for (let y = y0; y <= Math.min(y1, y0 + Math.floor((y1 - y0) * 0.2)); y++) if (rowCounts[y] > maxUpper) maxUpper = rowCounts[y];
+      const thrTop = Math.max(3, Math.floor(maxUpper * 0.2));
+      while (y0 < y1 && rowCounts[y0] < thrTop) y0++;
       return { x0, y0, x1, y1, cw: x1 - x0 + 1, ch: y1 - y0 + 1 };
     }
 
