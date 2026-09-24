@@ -4,8 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#000000" />
-  <title>Rocket Bay — live compose</title>
+  <meta name="theme-color" content="#0b1026" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="RocketBay" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="description" content="Build a rocket from modular parts and launch it." />
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>RocketBay</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -193,6 +201,45 @@
     #soundBtn.on { background: rgba(0,180,220,.55); }
     #launchBtn.holding { background: rgba(255,80,0,.95); transform: scale(0.98); }
     #ops .op.big { font-size: 12px; padding: 8px 14px; }
+    /* friend-trial: first-screen hint + feedback */
+    #firstHint {
+      position: fixed; z-index: 45; left: 50%; transform: translateX(-50%);
+      top: calc(26px + env(safe-area-inset-top)); width: min(92vw, 420px);
+      display: none; align-items: center; gap: 8px; padding: 9px 10px 9px 12px;
+      background: rgba(8,14,30,.88); border: 1px solid rgba(0,200,224,.6); border-radius: 10px;
+      font: 600 12px/1.35 system-ui, -apple-system, sans-serif; color: #eaf6ff; box-shadow: 0 4px 16px rgba(0,0,0,.45);
+    }
+    #firstHint.on { display: flex; }
+    #firstHint b { color: #ffb14a; }
+    #firstHint .txt { flex: 1; }
+    #firstHint button { flex: 0 0 auto; border: 0; border-radius: 7px; padding: 6px 10px; background: var(--cyan); color: #041018; font-weight: 800; font-size: 11px; }
+    #fbBtn {
+      position: fixed; z-index: 44; right: calc(6px + env(safe-area-inset-right)); top: calc(4px + env(safe-area-inset-top));
+      border: 1px solid rgba(255,255,255,.35); border-radius: 12px; padding: 4px 9px; background: rgba(0,0,0,.45);
+      color: #fff; font: 700 10px/1.2 system-ui, -apple-system, sans-serif; letter-spacing: .3px; display: none;
+    }
+    #fbBtn.on { display: block; }
+    #fbModal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; padding: 16px; }
+    #fbModal.on { display: flex; }
+    #fbCard {
+      width: min(94vw, 420px); background: #0d1428; border: 1px solid rgba(0,200,224,.55); border-radius: 12px; padding: 14px;
+      color: #eaf6ff; font: 13px/1.4 system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; gap: 8px;
+    }
+    #fbCard h2 { margin: 0; font-size: 15px; }
+    #fbCard .sub { font-size: 11px; opacity: .75; }
+    #fbCard textarea, #fbCard input {
+      width: 100%; background: #060a16; color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px;
+      padding: 8px; font: 14px/1.35 system-ui, -apple-system, sans-serif;
+    }
+    #fbCard textarea { height: 120px; resize: vertical; }
+    #fbCard .count { font-size: 10px; opacity: .6; text-align: right; margin-top: -4px; }
+    #fbCard .btns { display: flex; gap: 8px; justify-content: flex-end; }
+    #fbCard .btns button { border: 0; border-radius: 8px; padding: 9px 14px; font-weight: 800; font-size: 12px; }
+    #fbSend { background: var(--accent); color: #1a0d00; }
+    #fbSend:disabled { opacity: .5; }
+    #fbCancel { background: rgba(255,255,255,.15); color: #fff; }
+    #fbStatus { font-size: 12px; min-height: 16px; }
+    #fbStatus.ok { color: #9dfcc0; } #fbStatus.err { color: #ffb4a6; }
   </style>
 </head>
 <body>
@@ -214,6 +261,19 @@
   </div>
 
   <div id="buildLabel" aria-hidden="true"></div>
+  <div id="firstHint" role="note"><span class="txt">Build your rocket from the parts below, then tap <b>GO FOR LAUNCH</b>.</span><button type="button" id="hintOk">GOT IT</button></div>
+  <button type="button" id="fbBtn" aria-haspopup="dialog">Feedback</button>
+  <div id="fbModal" role="dialog" aria-modal="true" aria-labelledby="fbTitle">
+    <div id="fbCard">
+      <h2 id="fbTitle">Send feedback</h2>
+      <div class="sub">What worked, what broke, what you'd like. Your build and device info are attached.</div>
+      <textarea id="fbText" maxlength="1000" placeholder="Your feedback…"></textarea>
+      <div class="count" id="fbCount">0 / 1000</div>
+      <input id="fbName" maxlength="40" placeholder="Name (optional)" autocomplete="nickname" />
+      <div id="fbStatus" aria-live="polite"></div>
+      <div class="btns"><button type="button" id="fbCancel">Close</button><button type="button" id="fbSend">Send</button></div>
+    </div>
+  </div>
   <div id="chrome">
     <div id="meta"></div>
     <div class="row" id="todRow"></div>
@@ -251,14 +311,14 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=modular2"></script>
-  <script src="liftoff.js?v=modular2"></script>
+  <script src="modular.js?v=trial1"></script>
+  <script src="liftoff.js?v=trial1"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
-    const KIT_VER = "modular2";
+    const KIT_VER = "trial1";
     const PAD_VER = "pad5";
-    const APP_VER = "modular2";
+    const APP_VER = "trial1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -304,6 +364,62 @@
     $("trayL").addEventListener("click", () => trayEl.scrollBy({ left: -Math.round(trayEl.clientWidth * 0.7), behavior: "smooth" }));
     $("trayR").addEventListener("click", () => trayEl.scrollBy({ left: Math.round(trayEl.clientWidth * 0.7), behavior: "smooth" }));
     $("buildLabel").textContent = APP_VER;
+
+    /* ---------- friend-trial: first-screen hint (once) ---------- */
+    const LS = { get: (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+                 set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} } };
+    const hintEl = $("firstHint");
+    function hideHint() {
+      if (!hintEl.classList.contains("on")) return;
+      hintEl.classList.remove("on");
+      LS.set("rb_hint_seen", "1");
+    }
+    if (!LS.get("rb_hint_seen") && !new URLSearchParams(location.search).has("capture")) hintEl.classList.add("on");
+    $("hintOk").addEventListener("click", hideHint);
+
+    /* ---------- friend-trial: feedback -> Firestore (create-only rules) ---------- */
+    const FB_COOLDOWN_MS = 30000;
+    const fbMod = () => import("./firebase-init.js?v=" + APP_VER); // shared module (feedback now, leaderboard later)
+    const fbModal = $("fbModal"), fbText = $("fbText"), fbName = $("fbName"), fbStatus = $("fbStatus"), fbSend = $("fbSend");
+    const fbSet = (t, c) => { fbStatus.textContent = t || ""; fbStatus.className = c || ""; };
+    function openFeedback() {
+      fbSet(""); fbSend.disabled = false; fbModal.classList.add("on");
+      const nm = LS.get("rb_fb_name"); if (nm && !fbName.value) fbName.value = nm;
+      setTimeout(() => fbText.focus(), 50);
+    }
+    $("fbBtn").addEventListener("click", openFeedback);
+    $("fbCancel").addEventListener("click", () => fbModal.classList.remove("on"));
+    fbModal.addEventListener("click", (e) => { if (e.target === fbModal) fbModal.classList.remove("on"); });
+    fbText.addEventListener("input", () => { $("fbCount").textContent = fbText.value.length + " / 1000"; });
+    fbSend.addEventListener("click", async () => {
+      const text = fbText.value.trim().slice(0, 1000), name = fbName.value.trim().slice(0, 40);
+      if (!text) { fbSet("Type a few words first.", "err"); return; }
+      const last = +(LS.get("rb_fb_last") || 0), wait = FB_COOLDOWN_MS - (Date.now() - last);
+      if (wait > 0) { fbSet(`Thanks! Please wait ${Math.ceil(wait / 1000)} s before sending again.`, "err"); return; }
+      fbSend.disabled = true; fbSet("Sending…");
+      try {
+        const M = await fbMod();
+        const { db, fs } = await M.getDb();
+        const b = state.build, cid = M.clientId();
+        const stack = (idsOf(b).join(",") + (b.sides ? "+sides" : "")).slice(0, 200);
+        const standalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone;
+        const device = `${screen.width}x${screen.height}@${(window.devicePixelRatio || 1).toFixed(2)} vp ${innerWidth}x${innerHeight}${standalone ? " standalone" : ""}`.slice(0, 120);
+        const data = { text, build: APP_VER, tod: String(TODS[state.todIndex].id), stack, ua: navigator.userAgent.slice(0, 400),
+          device, clientTs: Date.now(), cid, createdAt: fs.serverTimestamp() };
+        if (name) data.name = name;
+        const batch = fs.writeBatch(db);
+        M.stampThrottle(fs, db, batch, cid);
+        batch.set(fs.doc(fs.collection(db, "feedback")), data);
+        await batch.commit();
+        LS.set("rb_fb_last", String(Date.now())); if (name) LS.set("rb_fb_name", name);
+        fbText.value = ""; $("fbCount").textContent = "0 / 1000";
+        fbSet("Sent — thank you!", "ok");
+        setTimeout(() => { if (fbStatus.className === "ok") fbModal.classList.remove("on"); }, 1400);
+      } catch (e) {
+        console.warn("[feedback] send failed", e);
+        fbSet(/permission/i.test(String(e && e.code || e)) ? "Too many sends — try again in a minute." : "Couldn't send (offline?). Please try again.", "err");
+      } finally { fbSend.disabled = false; }
+    });
     const launchBtn = $("launchBtn"), assembleUI = $("assembleUI"), opsEl = $("ops"), chromeEl = $("chrome");
     const missionBox = $("missionBox"), outcomeBox = $("outcomeBox"), stackHud = $("stackHud"), phaseHud = $("phaseHud");
 
@@ -668,7 +784,7 @@
       if (state.phase !== "liftoff") { stackEl.style.transform = ""; stackEl.style.opacity = "1"; }
       stackEl.style.display = "block";
       stackEl.classList.add("on");
-      const ctx = stackEl.getContext("2d");
+      const ctx = stackEl.getContext("2d", { willReadFrequently: true }); // read back by liftoff _measureStack
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, lb.width, totalH);
       const s = lb.width / lb.nw;
@@ -756,6 +872,8 @@
       meta.style.display = (p === "liftoff" || p === "assemble") ? "none" : "";
       $("hud").style.display = (p === "liftoff" || p === "grounded" || p === "assemble") ? "none" : "";
       missionBox.classList.toggle("on", p === "mission");
+      $("fbBtn").classList.toggle("on", p === "assemble" || p === "mission" || p === "outcome");
+      if (p !== "assemble") hideHint();
       outcomeBox.classList.toggle("on", p === "outcome");
       phaseHud.textContent = p.toUpperCase();
       stackHud.textContent = KIT ? (idsOf(state.build).map(lbl).join(" + ") || "\u2014") : "";

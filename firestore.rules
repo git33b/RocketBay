@@ -1,0 +1,72 @@
+rules_version = '2';
+// RocketBay Firestore rules.
+// Pattern for every public-write collection: CREATE-ONLY from clients (no reads/updates/deletes),
+// field whitelist, per-field type + size caps, server timestamp, and a per-browser throttle.
+// Owners read data in the Firebase console or with scripts/read-feedback.sh (admin credentials).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- shared helpers (copy-paste friendly for new collections) ----------
+    function incoming() { return request.resource.data; }
+    // exact field whitelist: `allowed` = every permitted key, `required` = must be present
+    function onlyFields(allowed, required) {
+      return incoming().keys().hasOnly(allowed) && incoming().keys().hasAll(required);
+    }
+    function isStr(v, minLen, maxLen) { return v is string && v.size() >= minLen && v.size() <= maxLen; }
+    // optional string field: absent, or a string within the cap
+    function optStr(field, maxLen) { return !(field in incoming()) || isStr(incoming()[field], 0, maxLen); }
+    function optInt(field) { return !(field in incoming()) || incoming()[field] is int; }
+    // timestamp must be the server's request time (client sends serverTimestamp()) -> no backdating
+    function serverStamped(field) { return incoming()[field] == request.time; }
+    // rate limit: the same batch must stamp throttle/{cid} (whose rules enforce the 30 s gap)
+    function throttled(cid) {
+      return isStr(cid, 8, 40)
+        && getAfter(/databases/$(database)/documents/throttle/$(cid)).data.last == request.time;
+    }
+
+    // ---------- throttle: one doc per browser id, >= 30 s between stamped writes ----------
+    match /throttle/{cid} {
+      allow read, delete: if false;
+      allow create: if cid.size() <= 40
+        && onlyFields(['last'], ['last']) && serverStamped('last');
+      allow update: if onlyFields(['last'], ['last']) && serverStamped('last')
+        && request.time > resource.data.last + duration.value(30, 's');
+    }
+
+    // ---------- feedback (friend trial) ----------
+    match /feedback/{id} {
+      allow read, update, delete: if false;
+      allow create: if onlyFields(
+            ['text', 'name', 'build', 'tod', 'stack', 'ua', 'device', 'clientTs', 'cid', 'createdAt'],
+            ['text', 'build', 'cid', 'createdAt'])
+        && isStr(incoming().text, 1, 1000)
+        && optStr('name', 40)
+        && isStr(incoming().build, 1, 32)
+        && optStr('tod', 8)
+        && optStr('stack', 200)
+        && optStr('ua', 400)
+        && optStr('device', 120)
+        && optInt('clientTs')
+        && serverStamped('createdAt')
+        && throttled(incoming().cid);
+    }
+
+    // ---------- leaderboard (NOT enabled yet; template for the next ticket) ----------
+    // match /leaderboard/{id} {
+    //   allow read: if true;                      // public board (or restrict to a summary doc)
+    //   allow update, delete: if false;
+    //   allow create: if onlyFields(['name', 'score', 'build', 'stack', 'tod', 'cid', 'createdAt'],
+    //                               ['name', 'score', 'build', 'cid', 'createdAt'])
+    //     && isStr(incoming().name, 1, 20)
+    //     && incoming().score is int && incoming().score >= 0 && incoming().score <= 100
+    //     && isStr(incoming().build, 1, 32) && optStr('stack', 200) && optStr('tod', 8)
+    //     && serverStamped('createdAt')
+    //     && throttled(incoming().cid);
+    // }
+
+    // everything else is closed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

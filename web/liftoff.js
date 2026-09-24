@@ -7,7 +7,7 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "modular2";
+  const BUILD = "trial1";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
@@ -611,7 +611,7 @@
     st.style.clipPath = ""; st.style.webkitClipPath = "";
     const w = st.width, h = st.height;
     let data;
-    try { data = st.getContext("2d").getImageData(0, 0, w, h).data; } catch (e) { return; }
+    try { data = st.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, w, h).data; } catch (e) { return; }
     let top = -1;
     for (let y = 0; y < h && top < 0; y++) {
       for (let x = 0; x < w; x++) if (data[(y * w + x) * 4 + 3] > 100) { top = y; break; }
