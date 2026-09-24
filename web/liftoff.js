@@ -7,7 +7,7 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "trial1";
+  const BUILD = "audio1";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
@@ -96,7 +96,7 @@
     this.ground = makePool(POOL_GROUND, 2);
     this.trail = makePool(POOL_TRAIL, 1);
     this.perf = [];
-    this.audioMuted = true;
+    this.audioMuted = false;
     this.audio = null;
     this._targetVol = 0;
     this._rng = 1;
@@ -416,7 +416,20 @@
           sm.push([r / n, g / n, b2 / n]);
         }
         this._skyCol = sm;
-      } catch (e) { this._skyCol = null; }
+        // SLOP-5: cloud tones sampled from the plate's own painted clouds (5 luminance quantiles)
+        const lumOf = (i) => pd[i] * 0.3 + pd[i + 1] * 0.59 + pd[i + 2] * 0.11;
+        const px = [];
+        for (let yy = 0; yy < Math.round(nh * 0.45); yy += 3) for (let x = 0; x < nw; x += 3) {
+          const i = (yy * nw + x) * 4, r = pd[i], g = pd[i + 1], b = pd[i + 2];
+          if (pal.parallax === "day") { if (r > 150 && g > 165 && b > 190 && r + g + b > 520) px.push(i); }
+          else px.push(i);
+        }
+        px.sort((p, q) => lumOf(p) - lumOf(q));
+        let qs = null;
+        if (pal.parallax === "day" && px.length > 50) qs = [0.04, 0.25, 0.5, 0.75, 0.97];
+        else if (px.length > 50) qs = [0.55, 0.7, 0.82, 0.92, 0.985];
+        this._cloudTones = qs ? qs.map((q) => { const i = px[Math.min(px.length - 1, Math.floor(q * px.length))]; return [pd[i], pd[i + 1], pd[i + 2]]; }) : null;
+      } catch (e) { this._skyCol = null; this._cloudTones = null; }
     } else { this._skyTopRgb = null; this._skyRows = null; }
 
     function parseDeep(col) {
@@ -429,62 +442,71 @@
     }
     const deep = parseDeep(pal.deep);
 
-    // Extension ONLY in [0, ext) via ImageData — never touch plate rows
+    // SLOP-4 (audio1): NO mirroring. The extension is a painted continuation of the plate's
+    // own top sky: per-column top colour (structure-masked band, block medians + wide blur, so
+    // no tower/spire/cloud can repeat), graded toward a zenith colour extrapolated from the
+    // plate's vertical sky gradient, laid down in flat bands with 4x4 Bayer-dithered edges.
     const extImg = ctx.createImageData(nw, ext);
     const d = extImg.data;
     if (bandData) {
-      // Single long reflection: forward 0..N-1, then mirrored N..2N-1, then hold last row
+      const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+      const TR = 36, BLK = 48, nb = Math.ceil(nw / BLK);
+      const bR = new Float32Array(nb), bG = new Float32Array(nb), bB = new Float32Array(nb);
+      for (let k = 0; k < nb; k++) {
+        const R = [], G = [], B = [];
+        for (let y = 0; y < TR; y++) for (let x = k * BLK; x < Math.min(nw, (k + 1) * BLK); x++) {
+          const i = (y * nw + x) * 4; R.push(bandData[i]); G.push(bandData[i + 1]); B.push(bandData[i + 2]);
+        }
+        bR[k] = med(R); bG[k] = med(G); bB[k] = med(B);
+      }
+      const top = new Float32Array(nw * 3);
+      for (let x = 0; x < nw; x++) {
+        const fb = x / BLK - 0.5, k0 = Math.max(0, Math.min(nb - 1, Math.floor(fb))), k1 = Math.min(nb - 1, k0 + 1);
+        const t = Math.max(0, Math.min(1, fb - k0));
+        top[x * 3] = bR[k0] * (1 - t) + bR[k1] * t; top[x * 3 + 1] = bG[k0] * (1 - t) + bG[k1] * t; top[x * 3 + 2] = bB[k0] * (1 - t) + bB[k1] * t;
+      }
+      { // wide horizontal box blur (r = 64) -> only the broad sun-side gradient survives
+        const Rr = 64, tmp = new Float32Array(nw * 3);
+        for (let x = 0; x < nw; x++) { let r = 0, g = 0, bb = 0, n = 0;
+          for (let k = -Rr; k <= Rr; k += 4) { const xx = Math.max(0, Math.min(nw - 1, x + k)); r += top[xx * 3]; g += top[xx * 3 + 1]; bb += top[xx * 3 + 2]; n++; }
+          tmp[x * 3] = r / n; tmp[x * 3 + 1] = g / n; tmp[x * 3 + 2] = bb / n; }
+        top.set(tmp);
+      }
+      // zenith: extrapolate the plate's top-down sky gradient (row 4 vs ~row 0.2 nh)
+      const col = this._skyCol;
+      let zen = [0, 0, 0];
+      const t0c = [0, 0, 0]; for (let x = 0; x < nw; x++) { t0c[0] += top[x * 3]; t0c[1] += top[x * 3 + 1]; t0c[2] += top[x * 3 + 2]; }
+      t0c[0] /= nw; t0c[1] /= nw; t0c[2] /= nw;
+      { // match the altitude overlay's base colour so the overlay hand-off never shows a step
+        const ref = (tod === "03" && this._skyCol) ? this._skyCol[0] : this._skyTopRgb;
+        if (ref) for (let c = 0; c < 3; c++) { const dv = ref[c] - t0c[c]; for (let x = 0; x < nw; x++) top[x * 3 + c] = clamp(top[x * 3 + c] + dv, 0, 255); t0c[c] = ref[c]; }
+      }
+      if (col && col.length > 40) {
+        const r0 = col[Math.min(col.length - 1, 22)], r1 = col[Math.min(col.length - 1, Math.round(nh * 0.2))];
+        const span = Math.max(1, Math.round(nh * 0.2) - 22);
+        for (let c = 0; c < 3; c++) {
+          let dv = (r0[c] - r1[c]) / span * ext * 0.14;
+          dv = Math.max(-70, Math.min(70, dv));
+          zen[c] = Math.max(0, Math.min(255, t0c[c] + dv));
+        }
+      } else zen = t0c.slice();
+      zen = [zen[0] * 0.85 + deep[0] * 0.15, zen[1] * 0.85 + deep[1] * 0.15, zen[2] * 0.85 + deep[2] * 0.15];
+      const BH = 40, J = 10;
       for (let y = 0; y < ext; y++) {
-        const above = ext - 1 - y; // 0 at junction (= plate top)
-        let srcRow;
-        if (above < N) {
-          srcRow = above; // continues plate top upward (row 0 = plate row 0)
-        } else if (above < N * 2) {
-          srcRow = N - 1 - (above - N); // one long vertical mirror
-        } else {
-          srcRow = 0; // hold plate-top row (will deep-grade)
-        }
-        const si0 = srcRow * nw * 4;
-        const di0 = y * nw * 4;
+        const above = ext - 1 - y;
         for (let x = 0; x < nw; x++) {
-          const si = si0 + x * 4, di = di0 + x * 4;
-          d[di] = bandData[si];
-          d[di + 1] = bandData[si + 1];
-          d[di + 2] = bandData[si + 2];
-          d[di + 3] = 255;
-        }
-      }
-      // Cosine falloff at the single mirror fold (above = N)
-      const fold = N;
-      for (let dy = -FALL; dy <= FALL; dy++) {
-        const above = fold + dy;
-        if (above < 0 || above >= ext) continue;
-        const y = ext - 1 - above;
-        const above2 = fold - dy;
-        if (above2 < 0 || above2 >= ext) continue;
-        const y2 = ext - 1 - above2;
-        const t = (dy + FALL) / (FALL * 2);
-        const mix = (0.5 - 0.5 * Math.cos(Math.PI * t)) * (1 - Math.abs(dy) / FALL);
-        for (let x = 0; x < nw; x++) {
-          const i0 = (y * nw + x) * 4;
-          const i1 = (y2 * nw + x) * 4;
-          d[i0] = (d[i0] * (1 - mix) + d[i1] * mix) | 0;
-          d[i0 + 1] = (d[i0 + 1] * (1 - mix) + d[i1 + 1] * mix) | 0;
-          d[i0 + 2] = (d[i0 + 2] * (1 - mix) + d[i1 + 2] * mix) | 0;
-        }
-      }
-      // Junction: force near-plate rows toward exact band row 0..FALL (matches plate top)
-      for (let k = 0; k < FALL; k++) {
-        const above = k;
-        const y = ext - 1 - above;
-        const srcRow = Math.min(N - 1, k);
-        const w = 0.5 + 0.5 * Math.cos(Math.PI * (k / FALL)); // 1 at junction
-        for (let x = 0; x < nw; x++) {
+          const bay = BAYER4[(((above >> 1) & 3) << 2) | ((x >> 1) & 3)];
+          const band = Math.max(0, Math.floor((above + (bay - 0.5) * 10) / BH));
+          const u = smooth01(0, ext * 0.7, (band + 0.5) * BH);
           const di = (y * nw + x) * 4;
-          const si = (srcRow * nw + x) * 4;
-          d[di] = (d[di] * (1 - w) + bandData[si] * w) | 0;
-          d[di + 1] = (d[di + 1] * (1 - w) + bandData[si + 1] * w) | 0;
-          d[di + 2] = (d[di + 2] * (1 - w) + bandData[si + 2] * w) | 0;
+          if (above < J && bay > above / J) { // dithered hand-off from the (masked) plate top row
+            const si = x * 4; d[di] = bandData[si]; d[di + 1] = bandData[si + 1]; d[di + 2] = bandData[si + 2];
+          } else {
+            d[di] = top[x * 3] + (zen[0] - top[x * 3]) * u;
+            d[di + 1] = top[x * 3 + 1] + (zen[1] - top[x * 3 + 1]) * u;
+            d[di + 2] = top[x * 3 + 2] + (zen[2] - top[x * 3 + 2]) * u;
+          }
+          d[di + 3] = 255;
         }
       }
     } else {
@@ -496,11 +518,13 @@
     // Slow deep grade only in upper extension (far from junction / plate)
     for (let y = 0; y < ext; y++) {
       const above = ext - 1 - y;
-      const t = above / (ext * 0.9);
-      if (t < 0.5) continue;
-      const u = (t - 0.5) / 0.5;
-      const deepW = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, u));
       for (let x = 0; x < nw; x++) {
+        const bay = BAYER4[(((above >> 1) & 3) << 2) | ((x >> 1) & 3)];
+        const aq = (Math.floor((above + (bay - 0.5) * 10) / 40) + 0.5) * 40;
+        const t = aq / (ext * 0.9);
+        if (t < 0.5) continue;
+        const u = (t - 0.5) / 0.5;
+        const deepW = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, u));
         const i = (y * nw + x) * 4;
         d[i] = (d[i] * (1 - deepW) + deep[0] * deepW) | 0;
         d[i + 1] = (d[i + 1] * (1 - deepW) + deep[1] * deepW) | 0;
@@ -667,6 +691,15 @@
       for (let k = -BLUR; k <= BLUR; k++) { const yy = y + k; if (yy < 0 || yy >= H) continue; r += row[yy * 3]; g += row[yy * 3 + 1]; b += row[yy * 3 + 2]; n++; }
       blur[y * 3] = r / n; blur[y * 3 + 1] = g / n; blur[y * 3 + 2] = b / n;
     }
+    // SLOP-4 (audio1): no mirrored columns. Seam colour = the outer 3 plate columns averaged per
+    // row and blurred vertically (never a reflected image), dithered into the wide sky median.
+    const edge = new Float32Array(H * 3);
+    for (let y = 0; y < H; y++) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let k = -6; k <= 6; k++) { const yy = y + k; if (yy < 0 || yy >= H) continue;
+        for (let q = 0; q < 3; q++) { const i = (yy * EDGE + (left ? q : EDGE - 1 - q)) * 4; r += src[i]; g += src[i + 1]; b += src[i + 2]; n++; } }
+      edge[y * 3] = r / n; edge[y * 3 + 1] = g / n; edge[y * 3 + 2] = b / n;
+    }
     const c = document.createElement("canvas"); c.width = padN; c.height = H;
     const g2 = c.getContext("2d");
     const img = g2.createImageData(padN, H), d = img.data;
@@ -675,12 +708,12 @@
         // j = distance from the seam (0 = adjacent to the plate edge)
         const x = left ? padN - 1 - j : j;
         const o = (y * padN + x) * 4;
-        const m = Math.min(EDGE - 1, j); // mirrored source column (distance from edge)
-        const si = (y * EDGE + (left ? m : EDGE - 1 - m)) * 4;
-        const t = j < MIR ? 0 : Math.min(1, (j - MIR) / XF);
-        const e = t * t * (3 - 2 * t);
-        const mr = j < EDGE ? src[si] : blur[y * 3], mg = j < EDGE ? src[si + 1] : blur[y * 3 + 1], mb = j < EDGE ? src[si + 2] : blur[y * 3 + 2];
-        d[o] = mr * (1 - e) + blur[y * 3] * e; d[o + 1] = mg * (1 - e) + blur[y * 3 + 1] * e; d[o + 2] = mb * (1 - e) + blur[y * 3 + 2] * e; d[o + 3] = 255;
+        const bay = BAYER4[(((y >> 1) & 3) << 2) | ((j >> 1) & 3)];
+        const t = Math.min(1, j / (MIR + XF));
+        const useBlur = bay < t * t * (3 - 2 * t);
+        const k3 = y * 3;
+        const src3 = useBlur ? blur : edge;
+        d[o] = src3[k3]; d[o + 1] = src3[k3 + 1]; d[o + 2] = src3[k3 + 2]; d[o + 3] = 255;
       }
     }
     g2.putImageData(img, 0, 0);
@@ -924,64 +957,52 @@
   };
 
 
-  /* ---------- audio (unchanged light path) ---------- */
+  /* ---------- audio v1 (web/audio.js: synthesized, scheduled on the sim timeline) ---------- */
   LiftoffEngine.prototype.ensureAudio = function () {
     if (this.audio) return this.audio;
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return null;
-    const ctx = new AC();
-    const master = ctx.createGain();
-    master.gain.value = 0;
-    master.connect(ctx.destination);
-    const bufSize = ctx.sampleRate * 2;
-    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf; noise.loop = true;
-    const filt = ctx.createBiquadFilter();
-    filt.type = "lowpass"; filt.frequency.value = 200;
-    const nGain = ctx.createGain(); nGain.gain.value = 0.4;
-    noise.connect(filt); filt.connect(nGain); nGain.connect(master);
-    noise.start();
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth"; osc.frequency.value = 40;
-    const oFilt = ctx.createBiquadFilter();
-    oFilt.type = "lowpass"; oFilt.frequency.value = 90;
-    const oGain = ctx.createGain(); oGain.gain.value = 0.14;
-    osc.connect(oFilt); oFilt.connect(oGain); oGain.connect(master);
-    osc.start();
-    this.audio = { ctx: ctx, master: master };
+    const RA = global.RocketBayAudio;
+    if (!AC || !RA) return null;
+    let ctx;
+    try { ctx = new AC({ latencyHint: "interactive" }); } catch (e) { try { ctx = new AC(); } catch (_) { return null; } }
+    const chain = RA.makeChain(ctx, ctx.destination);
+    chain.user.gain.value = this.audioMuted ? 0 : 1;
+    this.audio = { ctx: ctx, chain: chain, master: chain.user, launch: null };
     return this.audio;
+  };
+  // Must run inside the GO tap (iOS): create/resume the context and play one silent sample.
+  LiftoffEngine.prototype.unlockAudio = function () {
+    const a = this.ensureAudio();
+    if (!a) return;
+    try { if (a.ctx.state !== "running") a.ctx.resume().catch(function () {}); } catch (_) {}
+    try {
+      const b = a.ctx.createBuffer(1, 1, a.ctx.sampleRate), s = a.ctx.createBufferSource();
+      s.buffer = b; s.connect(a.ctx.destination); s.start(0);
+    } catch (_) {}
   };
   LiftoffEngine.prototype.setMuted = function (muted) {
     this.audioMuted = !!muted;
     if (!this.audio) return;
-    const g = this.audio.master.gain;
-    const now = this.audio.ctx.currentTime;
+    const g = this.audio.master.gain, now = this.audio.ctx.currentTime;
     g.cancelScheduledValues(now);
     g.setValueAtTime(g.value, now);
-    g.linearRampToValueAtTime(this.audioMuted ? 0 : this._targetVol, now + 0.06);
+    g.linearRampToValueAtTime(this.audioMuted ? 0 : 1, now + 0.06);
   };
-  LiftoffEngine.prototype.setAudioLevel = function (level) {
-    const next = clamp(level, 0, 0.55);
-    if (Math.abs(next - (this._lastAudioLevel || 0)) < 0.03) { this._targetVol = next; return; }
-    this._targetVol = next;
-    this._lastAudioLevel = next;
-    if (!this.audio || this.audioMuted) return;
-    const g = this.audio.master.gain;
-    const now = this.audio.ctx.currentTime;
-    g.cancelScheduledValues(now);
-    g.setValueAtTime(g.value, now);
-    g.linearRampToValueAtTime(this._targetVol, now + 0.08);
+  LiftoffEngine.prototype.setAudioLevel = function () { /* v1: levels are scheduled in audio.js */ };
+  LiftoffEngine.prototype._scheduleLaunchAudio = function () {
+    const a = this.audio, RA = global.RocketBayAudio;
+    this._audioT0 = null;
+    if (!a || !RA || this.captureMode) return;
+    const seat = (this.getSeat && this.getSeat()) || {};
+    const t0 = a.ctx.currentTime + 0.05;
+    a.launch = RA.scheduleLaunch(a.ctx, a.chain.input, t0, { boosters: !!(seat.nozzles && seat.nozzles.length > 1) });
+    this._audioT0 = t0;
   };
   LiftoffEngine.prototype.stopAudio = function (immediate) {
-    if (!this.audio) return;
-    const g = this.audio.master.gain;
-    const now = this.audio.ctx.currentTime;
-    g.cancelScheduledValues(now);
-    if (immediate) g.setValueAtTime(0, now);
-    else g.linearRampToValueAtTime(0, now + 0.5);
+    this._audioT0 = null;
+    if (!this.audio || !this.audio.launch) return;
+    this.audio.launch.stop(this.audio.ctx.currentTime, immediate ? 0.03 : 0.5);
+    this.audio.launch = null;
   };
   LiftoffEngine.prototype.vibrate = function (pattern) {
     try {
@@ -1197,6 +1218,33 @@
     const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
     const trenchW = Math.max(40, (seat.width || 100) * 1.1);
     const flick = 0.85 + 0.15 * Math.sin(this._simTime * 31);
+    // SLOP-1: keep-out columns so the flame + engine bells read through the smoke from the
+    // first ignition frame (smoke still billows around/behind them). Dithered edge.
+    const keep = [];
+    if (this.ignited) {
+      const nz = this.nozzleNative(seat), nzs = seat.nozzles && seat.nozzles.length ? seat.nozzles : [0];
+      const hullCss = Math.max(18, zs * (this._hullWcss || ((Math.max(80, seat.width || 120) / lb.nw) * lb.width * 0.76)));
+      const flameLen = Math.max(hullCss * 0.9, this._flameLenCss || 0);
+      for (let ni = 0; ni < nzs.length; ni++) {
+        const sc = seat.nozzleScales ? seat.nozzleScales[ni] : (ni ? 0.42 : 1);
+        const ndy = seat.nozzleDy && seat.nozzleDy[ni] ? seat.nozzleDy[ni] : 0;
+        const cp = this.cssFromNative(nz.x + nzs[ni], nz.y + ndy), c = this._w2s(cp.x, cp.y);
+        const hw = Math.max(2.5, hullCss * sc * 0.5) * bs;
+        keep.push({ x: c.x * bs, y0: c.y * bs - hullCss * sc * 0.45 * bs, y: c.y * bs, y1: c.y * bs + flameLen * 0.95 * bs, hw: hw });
+      }
+    }
+    this._smokeKeep = keep;
+    const kept = (x, y, b) => {
+      for (let k = 0; k < keep.length; k++) {
+        const q = keep[k];
+        if (y < q.y0 || y > q.y1) continue;
+        const grow = y > q.y ? 1 + 0.35 * (y - q.y) / Math.max(1, q.y1 - q.y) : 1;
+        const tail = y > q.y ? 1 - smooth01(0.7, 1, (y - q.y) / Math.max(1, q.y1 - q.y)) : 1;
+        const dx = Math.abs(x - q.x) / (q.hw * grow);
+        if (dx < (0.8 + 0.35 * b) * tail) return true;
+      }
+      return false;
+    };
     const drawPool = (pool, isTrail) => {
       for (let i = 0; i < pool.length; i++) {
         const o = pool[i];
@@ -1229,6 +1277,7 @@
             if (d > 1) continue;
             const b = BAYER4[((y & 3) << 2) | (x & 3)];
             if (d > 0.8 + 0.2 * b) continue; // dithered rim
+            if (keep.length && kept(x, y, b)) continue;
             let h = (x * 374761393 + y * 668265263 + seed) >>> 0;
             h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
             const hn = (h & 1023) / 1023;
@@ -1269,6 +1318,17 @@
     const str = this.flameIntensity * flick * (0.5 + this.releaseFlash * 1.5) * nearPad;
     if (str < 0.02 && this.releaseFlash <= 0.05) return;
     const gw = Math.max(20, (seat.width || 100) / this._lb.nw * this._lb.width * bs * 1.8);
+    // glow lights the smoke, not the engine bells (keep-out columns stay clean)
+    const keep = this._smokeKeep || [];
+    bctx.save();
+    if (keep.length) {
+      const m = bctx.getTransform();
+      bctx.setTransform(1, 0, 0, 1, 0, 0);
+      bctx.beginPath(); bctx.rect(0, 0, this._bufW, this._bufH);
+      for (let k = 0; k < keep.length; k++) { const q = keep[k]; bctx.rect(q.x - q.hw * 1.1, q.y0, q.hw * 2.2, q.y1 - q.y0); }
+      bctx.clip("evenodd");
+      bctx.setTransform(m);
+    }
     bctx.globalCompositeOperation = "lighter";
     // Soft disc glow — avoid hard horizontal bars that read as flame geometry
     const rings = this.phase === "climb" ? 3 : 5;
@@ -1296,6 +1356,7 @@
         }
       }
     }
+    bctx.restore();
     bctx.globalCompositeOperation = "source-over";
     bctx.globalAlpha = 1;
   };
@@ -1434,6 +1495,21 @@
   LiftoffEngine.prototype._paintFireBuf = function (field, pal) {
     const w = field.w, buf = field.buf, data = field.img.data;
     const h = field.activeRows != null ? field.activeRows : field.h;
+    // SLOP-6: on the bright day sky the cool tail must not go dim red/brown: the day ramp keeps
+    // the low end orange at full opacity and dissolves it with a sparse pixel breakup instead.
+    const dayTail = pal && pal.parallax === "day";
+    if (dayTail && !this._fireRampDay) {
+      const ramp = [];
+      const stops = [[255, 120, 36], [255, 132, 40], [255, 146, 42], [255, 160, 44], [255, 176, 52],
+        [255, 196, 64], [255, 218, 90], [255, 238, 150], [255, 250, 212]];
+      for (let i = 0; i <= 36; i++) {
+        const seg = (i / 36) * (stops.length - 1);
+        const i0 = Math.min(stops.length - 2, seg | 0), f = seg - i0;
+        const c = mix3(stops[i0], stops[i0 + 1], f);
+        ramp.push([c[0] | 0, c[1] | 0, c[2] | 0, i < 3 ? 0 : 255]);
+      }
+      this._fireRampDay = ramp;
+    }
     if (!this._fireRamp) {
       const ramp = [];
       const stops = [[0, 0, 0], [40, 8, 0], [120, 20, 0], [200, 40, 0], [255, 90, 10],
@@ -1447,7 +1523,7 @@
       }
       this._fireRamp = ramp;
     }
-    const ramp = this._fireRamp;
+    const ramp = dayTail ? this._fireRampDay : this._fireRamp;
     data.fill(0, 0, Math.min(data.length, (field.prevRows || field.h) * w * 4));
     for (let y = 0; y < h; y++) {
       // Non-cumulative per-row warp (±2-4 cells), mostly on cooler outer cells -> tongues
@@ -1461,7 +1537,8 @@
         let v = buf[row + sx];
         if (v > 36) v = 36;
         if (v <= 0) continue;
-        if (v < 9 && this._rand() < 0.28) continue;
+        if (dayTail) { if (v < 14 && this._rand() * 14 > v + 2) continue; }
+        else if (v < 9 && this._rand() < 0.28) continue;
         const c = ramp[v];
         const pi = (row + x) * 4;
         data[pi] = c[0]; data[pi + 1] = c[1]; data[pi + 2] = c[2]; data[pi + 3] = c[3];
@@ -1522,11 +1599,27 @@
     this._tickFire(field, { seedHalf: cool < 1 ? Math.round(seedHalf * 1.1) : seedHalf, heat: cool < 1 ? 40 : 36, len: lenCss, rows: rows, expand: 1, cool: cool });
     this._paintFireBuf(field, pal);
     const ar = Math.max(1, field.activeRows || rows);
+    this._flameLenCss = Math.min(lenCss, visRows);
     try { global.__liftoffFlameDbg = { hullW: hullW, lenCss: lenCss, seedHalf: seedHalf, rows: ar, fw: fw, u: u }; } catch (_) {}
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = "source-over";
+    // SLOP-2: with strap-on boosters keep a clear gap between the core plume and each side
+    // plume (tighten the core per row; side plumes keep their own width/position).
+    const seedUsed = cool < 1 ? Math.round(seedHalf * 1.1) : seedHalf;
+    const cf = (seedUsed + 3) / fw;               // plume content half-width / drawn width
+    let sideDx = 0, sideSc = 0;
+    if (nozzles.length > 1) {
+      const c0 = this.cssFromNative(nz.x + nozzles[0], nz.y);
+      sideDx = 1e9;
+      for (let ni = 1; ni < nozzles.length; ni++) {
+        const c1 = this.cssFromNative(nz.x + nozzles[ni], nz.y);
+        sideDx = Math.min(sideDx, Math.abs(c1.x - c0.x) * zf);
+        sideSc = Math.max(sideSc, seat.nozzleScales ? seat.nozzleScales[ni] : 0.42);
+      }
+    }
+    const gapPx = Math.max(5, hullW * 0.17);
     for (let ni = 0; ni < nozzles.length; ni++) {
       const isSide = ni > 0;
       const sc = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
@@ -1541,7 +1634,12 @@
       for (let y = 0; y < ar; y += BAND) {
         const yf = y / lenBase;
         const wsc = 1 + (expand - 1) * smooth01(0, 0.6, yf) * (1 - 0.45 * smooth01(0.72, 1.05, yf));
-        const dw = Math.round(field.w * sc * wsc);
+        let dw = Math.round(field.w * sc * wsc);
+        if (!isSide && sideDx > 0) {
+          const hs = cf * field.w * sideSc * wsc;
+          const maxHalf = Math.max(hullW * 0.18, sideDx - gapPx - hs);
+          dw = Math.min(dw, Math.round(maxHalf / cf));
+        }
         const bh = Math.min(BAND, ar - y);
         ctx.drawImage(field.canvas, 0, y, field.w, bh,
           Math.round(x0c - dw / 2), y0c + Math.round(y * sy), dw, Math.max(1, Math.round((y + bh) * sy) - Math.round(y * sy)));
@@ -1624,44 +1722,53 @@
     }
     this._altClouds = [];
     if (mode === "night") return;
-    const tones = mode === "day"
-      ? [[255, 255, 255], [226, 236, 248], [176, 198, 226]]
-      : [[250, 214, 200], [214, 170, 170], [150, 120, 150]];
-    const unit = Math.max(1, Math.round(Math.min(W, H) / 390)); // chunky pixel size
-    for (let i = 0; i < 9; i++) {
-      const cw = Math.round((40 + this._rand() * 70)), ch = Math.round(cw * (0.32 + this._rand() * 0.16));
+    // SLOP-5 (audio1): painted clouds that match the plates — long, wispy, slightly tilted
+    // streaks built from value-noise at 2 native-px clusters, 5 tones sampled from the plate's
+    // own clouds (lit from the top/sun side), dithered translucent rims, drawn at the plate's
+    // native pixel scale (no chunky upscaled lobes).
+    const tones = this._cloudTones || (mode === "day"
+      ? [[176, 198, 226], [205, 220, 238], [226, 236, 248], [240, 245, 252], [255, 255, 255]]
+      : [[120, 80, 130], [150, 96, 140], [180, 110, 130], [214, 130, 120], [240, 170, 140]]);
+    const seedBase = (this._rand() * 1e6) | 0;
+    const hash = (x, y, sd) => { let h = (x * 374761393 + y * 668265263 + sd * 2246822519) >>> 0; h = ((h ^ (h >>> 13)) * 1274126177) >>> 0; return ((h ^ (h >>> 16)) & 0xffff) / 0xffff; };
+    const vnoise = (x, y, sd) => {
+      const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+      const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+      const a = hash(xi, yi, sd), b = hash(xi + 1, yi, sd), c = hash(xi, yi + 1, sd), d = hash(xi + 1, yi + 1, sd);
+      return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+    };
+    const lbS = this._lb ? this._lb.width / this._lb.nw : 1;
+    for (let i = 0; i < 8; i++) {
+      const cw = Math.round(110 + this._rand() * 150), ch = Math.round(26 + this._rand() * 26);
       const c = document.createElement("canvas");
       c.width = cw; c.height = ch;
       const g = c.getContext("2d");
       const img = g.createImageData(cw, ch);
       const d = img.data;
-      const lobes = [];
-      const nl = 3 + ((this._rand() * 3) | 0);
-      for (let k = 0; k < nl; k++) {
-        const lx = cw * (0.2 + 0.6 * (k / Math.max(1, nl - 1))) + (this._rand() - 0.5) * cw * 0.1;
-        const lr = ch * (0.3 + this._rand() * 0.22) * (k === 0 || k === nl - 1 ? 0.75 : 1);
-        lobes.push([lx, ch - lr - 1 - this._rand() * ch * 0.1, lr]);
-      }
-      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-        let best = 9, ly = 0;
-        for (let k = 0; k < lobes.length; k++) {
-          const L = lobes[k];
-          const dd = Math.hypot((x - L[0]) / (L[2] * 1.25), (y - L[1]) / L[2]);
-          if (dd < best) { best = dd; ly = (y - L[1]) / L[2]; }
+      const sd = seedBase + i * 101;
+      const tilt = -(0.08 + this._rand() * 0.16);
+      for (let y = 0; y < ch; y += 2) for (let x = 0; x < cw; x += 2) {
+        const xr = (x - cw / 2) / (cw / 2), yr0 = (y - ch / 2) / (ch / 2);
+        const yr = yr0 - tilt * xr * (cw / ch) * 0.35;
+        const env = 1 - (xr * xr * 0.9 + yr * yr * 1.25);
+        if (env < -0.25) continue;
+        const nA = vnoise(x / 18, y / 7, sd) * 0.55 + vnoise(x / 7, y / 4, sd + 7) * 0.3 + vnoise(x / 3, y / 2.5, sd + 13) * 0.15;
+        const dens = env * 0.95 + (nA - 0.5) * 1.1;
+        const bay = BAYER4[(((y >> 1) & 3) << 2) | ((x >> 1) & 3)];
+        if (dens < 0.08 + 0.22 * bay) continue;
+        const light = 0.55 * dens - 0.55 * yr - 0.15 * xr + (nA - 0.5) * 0.6;
+        const ti = clamp(Math.floor(1.6 + light * 2.4 + (bay - 0.5) * 0.9), 0, tones.length - 1);
+        const a = dens < 0.2 + 0.2 * bay ? 150 : 255; // translucent dithered rim
+        for (let yy = y; yy < Math.min(ch, y + 2); yy++) for (let xx = x; xx < Math.min(cw, x + 2); xx++) {
+          const p = (yy * cw + xx) * 4;
+          d[p] = tones[ti][0]; d[p + 1] = tones[ti][1]; d[p + 2] = tones[ti][2]; d[p + 3] = a;
         }
-        if (y > ch - 3) best = Math.max(best, 1.1); // flat base
-        const b = BAYER4[((y & 3) << 2) | (x & 3)];
-        if (best > 0.82 + 0.18 * b) continue;
-        let ti = Math.round(ly * 1.2 + 0.5 + (b - 0.5) * 0.9 + (1 - best) * -0.3);
-        ti = ti < 0 ? 0 : (ti > 2 ? 2 : ti);
-        const p = (y * cw + x) * 4;
-        d[p] = tones[ti][0]; d[p + 1] = tones[ti][1]; d[p + 2] = tones[ti][2]; d[p + 3] = 255;
       }
       g.putImageData(img, 0, 0);
       const depth = 0.45 + this._rand() * 0.9;
       this._altClouds.push({
-        c: c, x: this._rand() * W - cw, y: this._rand() * H * 1.2 - H * 0.2,
-        depth: depth, scale: unit * 2 * (0.6 + depth * 0.5),
+        c: c, x: this._rand() * W - cw * lbS, y: this._rand() * H * 1.2 - H * 0.2,
+        depth: depth, scale: lbS * (0.75 + depth * 0.35),
       });
     }
   };
@@ -1726,34 +1833,61 @@
       this._altBlendU = tBlend;
     }
     {
-      const band = 4;
+      // SLOP-3 (audio1): the overlay is painted, not smooth — flat colour bands (~BAND css px)
+      // whose edges are 4x4 Bayer-dithered, rendered on a half-res grid (2 css px cells) and
+      // upscaled nearest-neighbour. Per-row coverage (rowA) is a dithered dissolve too.
       const f0 = clean * 0.2, f1 = Math.min(clean * 0.5, 128) + 6; // opaque before the mirror fold (N)
-      const Nr = this._skyRowsN || 128;
-      for (let y = 0; y < H; y += band) {
-        const aboveN = (lb.top - (y + band - cy) / zA) / scaleY; // extension row (native) at this screen row
+      const CELL = 2, BAND = 22;
+      const gw = Math.ceil(W / CELL), gh = Math.ceil(H / CELL);
+      if (!this._skyLo || this._skyLo.width !== gw || this._skyLo.height !== gh) {
+        this._skyLo = document.createElement("canvas"); this._skyLo.width = gw; this._skyLo.height = gh;
+        this._skyLoImg = this._skyLo.getContext("2d").createImageData(gw, gh);
+        this._skyLoU32 = new Uint32Array(this._skyLoImg.data.buffer);
+      }
+      const sc = blendPlate ? (this._skyCol || this._skyRows) : null;
+      const seamY = zA * lb.top + cy;
+      const warm = smooth01(H * 0.5, H * 1.1, seamY);
+      const colAt = (y) => {
+        const yy = clamp(y / H, 0, 1);
+        if (!blendPlate) return mix3(upA, loA, yy);
+        // screen-space sunset gradient: top = plate top colour; the lower screen warms toward the
+        // plate's mid-sky (magenta/orange) once the plate's top edge has left the screen; the
+        // upper frame deepens first with altitude (k) -> painterly, not a flat wash
+        const rMax = (sc.length - 1) * 0.95 * (1 - 0.6 * k * k);
+        const ri = Math.round(warm * rMax * Math.pow(yy, 1.25));
+        const pc = sc[Math.max(0, Math.min(sc.length - 1, ri))];
+        const kRow = clamp(k * (1.2 - 0.95 * yy * yy), 0, 1);
+        return mix3(pc, mix3(upA, loA, yy), kRow);
+      };
+      const rowAAt = (y) => {
+        const aboveN = (lb.top - (y + 4 - cy) / zA) / scaleY; // extension row (native) at this screen row
         let rowA = smooth01(f0, f1, aboveN);
         if (blendPlate) rowA = Math.max(rowA * tBlend, smooth01(clean - 48, clean - 8, aboveN)); // repeat-row streaks never show
-        if (rowA <= 0.003) continue;
-        let col = mix3(upA, loA, y / H);
-        if (blendPlate) {
-          // screen-space sunset gradient: top = plate top colour; the lower screen warms toward
-          // the plate's mid-sky (magenta/orange) only once the plate's top edge has left the
-          // screen (no inverted band above the seam); everything darkens with altitude (k).
-          const sc = this._skyCol || this._skyRows;
-          const seamY = zA * lb.top + cy;
-          const warm = smooth01(H * 0.5, H * 1.1, seamY);
-          // warm magenta/orange glow hugs the bottom of the frame and fades slowly (k^2), while
-          // the upper frame deepens first -> painterly, not a flat wash
-          const yy = clamp(y / H, 0, 1);
-          const rMax = (sc.length - 1) * 0.95 * (1 - 0.6 * k * k);
-          const ri = Math.round(warm * rMax * Math.pow(yy, 1.25));
-          const pc = sc[Math.max(0, Math.min(sc.length - 1, ri))];
-          const kRow = clamp(k * (1.2 - 0.95 * yy * yy), 0, 1);
-          col = mix3(pc, mix3(upA, loA, yy), kRow);
+        return rowA;
+      };
+      const nBands = Math.ceil(H / BAND) + 2;
+      const bandCol = new Uint32Array(nBands);
+      for (let bi = 0; bi < nBands; bi++) {
+        const c = colAt((bi + 0.5) * BAND);
+        bandCol[bi] = ((255 << 24) | ((c[2] | 0) << 16) | ((c[1] | 0) << 8) | (c[0] | 0)) >>> 0;
+      }
+      const u32 = this._skyLoU32;
+      let any = false;
+      for (let gy = 0; gy < gh; gy++) {
+        const y = gy * CELL, rowA = rowAAt(y), row = gy * gw;
+        if (rowA <= 0.003) { u32.fill(0, row, row + gw); continue; }
+        any = true;
+        for (let gx = 0; gx < gw; gx++) {
+          const bay = BAYER4[((gy & 3) << 2) | (gx & 3)];
+          const bi = clamp(Math.floor((y + (bay - 0.5) * BAND * 0.55) / BAND), 0, nBands - 1);
+          // coverage stays a smooth per-row alpha (a dithered dissolve reads as a dot screen)
+          u32[row + gx] = rowA < 0.999 ? (((bandCol[bi] & 0x00ffffff) | (((rowA * 255) | 0) << 24)) >>> 0) : bandCol[bi];
         }
-        g.globalAlpha = rowA;
-        g.fillStyle = rgbaStr(col, 1);
-        g.fillRect(0, y, W, band);
+      }
+      if (any) {
+        this._skyLo.getContext("2d").putImageData(this._skyLoImg, 0, 0);
+        g.imageSmoothingEnabled = false;
+        g.drawImage(this._skyLo, 0, 0, gw, gh, 0, 0, gw * CELL, gh * CELL);
       }
       g.globalAlpha = 1;
     }
@@ -1801,7 +1935,7 @@
       const cloudA = clamp((v - 20) / 160, 0, 1) * (1 - smooth01(2000, 3600, alt)) * (mode === "day" ? 0.95 : 0.7);
       for (let i = 0; i < clouds.length; i++) {
         const cl = clouds[i];
-        const stretch = 1 + Math.min(1.1, (v * cl.depth) / 1300);
+        const stretch = 1 + Math.min(0.3, (v * cl.depth) / 4000);
         const dw = Math.round(cl.c.width * cl.scale), dh = Math.round(cl.c.height * cl.scale * stretch);
         cl.y += v * cl.depth * 0.55 * dt;
         if (cl.y > H + 4) {
@@ -1977,6 +2111,7 @@
         zoomLand: this._zoomLand, skyBlendU: this._altBlendU || 0,
         nozzleScreenY: this._lb ? (this._zoom || 1) * (this._lb.top + (seat.sitY - this.rocketY) * (this._lb.height / this._lb.nh)) + (this._camYi || 0) : null,
         app: BUILD,
+        audio: this.audio ? { state: this.audio.ctx.state, scheduled: this._audioT0 != null, muted: this.audioMuted } : null,
       };
     } catch (_) {}
 
@@ -2057,6 +2192,12 @@
     if (!this.lastTs) this.lastTs = ts;
     let dt = (ts - this.lastTs) / 1000;
     this.lastTs = ts;
+    // Keep the picture locked to the scheduled audio (audio clock is the master while running)
+    const a = this.audio;
+    if (a && this._audioT0 != null && a.ctx.state === "running") {
+      const target = a.ctx.currentTime - this._audioT0 - (a.ctx.outputLatency || a.ctx.baseLatency || 0);
+      if (target > 0) dt = clamp(target - this._simTime, 0, 0.1);
+    }
     this.tickSim(dt);
     if (this.running) this.raf = requestAnimationFrame(this._boundTick);
   };
@@ -2076,6 +2217,7 @@
       this.audio.ctx.resume().catch(function () {});
     }
     this.setMuted(this.audioMuted);
+    this._scheduleLaunchAudio();
     this.vibrate(15);
     try {
       global.__liftoffState = {

@@ -50,7 +50,7 @@ Compose (`index.html`) seating, plate path, and liftoff nozzle/glow/smoke all ca
 5. Camera follow; cover-style `plateMap()` (landscape crop / portrait CX-centered); `#skyExt` tiles sampled plate top band with soft blend
 6. Split smoke: ground (world/deck anchored) + nozzle trail; round pixel puffs; low-res buffer upscale
 7. Parallax stars/clouds with velocity streaks; altitude grade toward deep sky
-8. Optional WebAudio rumble (muted by default); DPR≤2
+8. AUDIO v1 (`audio.js`, all synthesized): countdown beeps → ignition rumble → release roar/crackle → altitude thinning; sound ON by default, persisted toggle (see `NOTES-audio-v1.md`); DPR≤2
 9. Deterministic capture: `?capture=1` + `window.__liftoffCapture.step(1/60)`
 
 FLY AGAIN resets camera, shake, particles, and audio.

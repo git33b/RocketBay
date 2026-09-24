@@ -175,6 +175,9 @@
     #todRow button { min-width: 0; padding: 6px 8px; font-size: 10px; }
     #world.assembleZoom { transition: transform .45s ease; }
     @media (orientation: landscape) and (max-height: 560px) {
+      /* narrow side panel: tab labels wrap onto two lines instead of touching */
+      #chrome.building #steps { gap: 4px; }
+      #chrome.building #steps button { white-space: normal; line-height: 1.15; padding: 5px 3px; font-size: 9.5px; letter-spacing: 0; }
       #chrome.building {
         left: auto; right: 0; top: 0; width: 318px; max-height: none;
         background: linear-gradient(90deg, transparent, rgba(0,0,0,.9) 16%);
@@ -197,7 +200,10 @@
       font-size: 18px; font-weight: 900; letter-spacing: .06em; color: #ffe08a;
     }
     #meta { text-align: center; font-size: 10px; opacity: .8; letter-spacing: .03em; }
-    #soundBtn { min-width: 72px; font-size: 10px; }
+    #soundBtn { min-width: 84px; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; }
+    #soundBtn .spk { width: 15px; height: 15px; flex: 0 0 auto; }
+    #soundBtn .x { display: none; } #soundBtn:not(.on) .waves { display: none; } #soundBtn:not(.on) .x { display: inline; }
+    #soundBtn:not(.on) { opacity: .85; }
     #soundBtn.on { background: rgba(0,180,220,.55); }
     #launchBtn.holding { background: rgba(255,80,0,.95); transform: scale(0.98); }
     #ops .op.big { font-size: 12px; padding: 8px 14px; }
@@ -261,7 +267,7 @@
   </div>
 
   <div id="buildLabel" aria-hidden="true"></div>
-  <div id="firstHint" role="note"><span class="txt">Build your rocket from the parts below, then tap <b>GO FOR LAUNCH</b>.</span><button type="button" id="hintOk">GOT IT</button></div>
+  <div id="firstHint" role="note"><span class="txt">Build your rocket from the parts <span id="hintWhere">below</span>, then tap <b>GO FOR LAUNCH</b>.</span><button type="button" id="hintOk">GOT IT</button></div>
   <button type="button" id="fbBtn" aria-haspopup="dialog">Feedback</button>
   <div id="fbModal" role="dialog" aria-modal="true" aria-labelledby="fbTitle">
     <div id="fbCard">
@@ -289,7 +295,7 @@
       <div class="row" id="actRow">
         <button type="button" class="ghost" id="undoBtn">UNDO</button>
         <button type="button" class="ghost" id="clearBtn">CLEAR</button>
-        <button type="button" class="ghost" id="soundBtn" title="Rumble audio (muted by default)">SOUND OFF</button>
+        <button type="button" class="ghost on" id="soundBtn" aria-pressed="true" aria-label="Sound: On"><svg class="spk" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><g class="waves" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 9.5a4 4 0 0 1 0 5"/><path d="M18.5 7a7.5 7.5 0 0 1 0 10"/></g><g class="x" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 9l5 6M21 9l-5 6"/></g></svg><span class="lbl">Sound: On</span></button>
         <button type="button" class="primary" id="launchBtn" disabled>GO FOR LAUNCH</button>
       </div>
     </div>
@@ -311,14 +317,15 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=trial1"></script>
-  <script src="liftoff.js?v=trial1"></script>
+  <script src="modular.js?v=audio1"></script>
+  <script src="audio.js?v=audio1"></script>
+  <script src="liftoff.js?v=audio1"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
-    const KIT_VER = "trial1";
+    const KIT_VER = "audio1";
     const PAD_VER = "pad5";
-    const APP_VER = "trial1";
+    const APP_VER = "audio1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -375,6 +382,12 @@
       LS.set("rb_hint_seen", "1");
     }
     if (!LS.get("rb_hint_seen") && !new URLSearchParams(location.search).has("capture")) hintEl.classList.add("on");
+    // hint copy follows the layout: landscape puts the builder in a side panel on the right
+    const sidePanelMQ = window.matchMedia("(orientation: landscape) and (max-height: 560px)");
+    const setHintWhere = () => { $("hintWhere").textContent = sidePanelMQ.matches ? "on the right" : "below"; };
+    setHintWhere();
+    if (sidePanelMQ.addEventListener) sidePanelMQ.addEventListener("change", setHintWhere); else sidePanelMQ.addListener(setHintWhere);
+    window.addEventListener("orientationchange", () => setTimeout(setHintWhere, 50));
     $("hintOk").addEventListener("click", hideHint);
 
     /* ---------- friend-trial: feedback -> Firestore (create-only rules) ---------- */
@@ -966,20 +979,26 @@
       return liftoffEngine;
     }
 
+    // Sound: On by default, persisted (rb_sound = "1" | "0")
+    let soundOn = LS.get("rb_sound") !== "0";
+    function renderSound() {
+      soundBtn.classList.toggle("on", soundOn);
+      soundBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+      soundBtn.setAttribute("aria-label", soundOn ? "Sound: On" : "Sound: Off");
+      soundBtn.querySelector(".lbl").textContent = soundOn ? "Sound: On" : "Sound: Off";
+    }
+    renderSound();
     soundBtn.onclick = () => {
+      soundOn = !soundOn;
+      LS.set("rb_sound", soundOn ? "1" : "0");
+      renderSound();
       const eng = getLiftoff();
-      const muted = !(soundBtn.textContent.indexOf("OFF") >= 0);
-      soundBtn.textContent = muted ? "SOUND OFF" : "SOUND ON";
-      soundBtn.classList.toggle("on", !muted);
-      if (eng) {
-        eng.ensureAudio();
-        if (eng.audio && eng.audio.ctx.state === "suspended") eng.audio.ctx.resume().catch(() => {});
-        eng.setMuted(muted);
-      }
+      if (eng) { if (soundOn) eng.unlockAudio(); eng.setMuted(!soundOn); }
     };
 
     launchBtn.onclick = async () => {
       if (launchBtn.disabled || state.phase !== "assemble") return;
+      { const eng0 = getLiftoff(); if (eng0) { eng0.audioMuted = !soundOn; eng0.unlockAudio(); } } // iOS: inside the tap
       state.swapSlot = null;
       if (rocket) rocket.anim = null;
       state.phase = "grounded";
@@ -996,7 +1015,7 @@
       paintStack();
       const eng = getLiftoff();
       if (!eng) { state.phase = "mission"; render(); return; }
-      eng.audioMuted = soundBtn.textContent.indexOf("OFF") >= 0;
+      eng.audioMuted = !soundOn;
       eng.start();
     };
 
