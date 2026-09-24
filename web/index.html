@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#000000" />
-  <title>Rocket Bay — playable trial</title>
+  <title>Rocket Bay — live compose</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -27,6 +27,18 @@
       width: 100%; height: 100%;
       object-fit: contain; object-position: center;
       background: #000; display: block;
+    }
+    #stack {
+      position: absolute; pointer-events: none;
+      image-rendering: auto;
+      display: none;
+      transform-origin: 50% 100%;
+    }
+    #stack.on { display: block; }
+    #stack.liftoff {
+      transition: transform 2.1s cubic-bezier(0.33, 0, 0.67, 1), opacity 0.4s 1.6s;
+      transform: translateY(-118%);
+      opacity: 0;
     }
     #fx {
       position: absolute; inset: 0; pointer-events: none;
@@ -121,7 +133,8 @@
 <body>
   <div id="stage">
     <div id="plateWrap">
-      <img id="plate" alt="Rocket Bay still" draggable="false" />
+      <img id="plate" alt="Rocket Bay pad" draggable="false" />
+      <canvas id="stack" width="1" height="1" aria-hidden="true"></canvas>
       <div id="fx"><div id="flames"></div></div>
       <div id="hud">
         <div class="pill" id="stackHud">Select parts</div>
@@ -160,13 +173,17 @@
   </div>
 
   <script>
+    const NATIVE_W = 1280, NATIVE_H = 720;
+    const SIT_Y = 548, TARGET_H = 500;
+    const CX = { "02": 556, "03": 685, "04": 717, "05": 634 };
+
     const TODS = [
       { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
       { id: "03", label: "SUNSET", file: "sunset", hourHint: [17, 18] },
       { id: "04", label: "NIGHT", file: "night", hourHint: [19, 20, 21, 22, 23, 0, 1, 2, 3, 4] },
       { id: "05", label: "DAY", file: "day", hourHint: [9, 10, 11, 12, 13, 14, 15, 16] },
     ];
-    const PHASES = ["assemble", "grounded", "liftoff", "mission", "outcome"];
+
     const PARTS = {
       s1: [
         { id: "moon-giant", name: "Moon Giant", role: "s1" },
@@ -194,13 +211,19 @@
       todIndex: 0,
       phase: "assemble",
       tab: "s1",
-      selected: { s1: null, s2: null, payload: null, boosters: null },
+      // Default wider stack (Steel Booster+Ship) to occlude empty-pad smear
+      selected: {
+        s1: PARTS.s1[0], // Moon Giant
+        s2: PARTS.s2[0],
+        payload: PARTS.payload[0],
+        boosters: PARTS.boosters[1], // Steel Booster
+      },
       missionChoice: null,
-      ops: [],
     };
 
     const plate = document.getElementById("plate");
     const plateWrap = document.getElementById("plateWrap");
+    const stackEl = document.getElementById("stack");
     const fx = document.getElementById("fx");
     const meta = document.getElementById("meta");
     const todRow = document.getElementById("todRow");
@@ -214,12 +237,25 @@
     const stackHud = document.getElementById("stackHud");
     const phaseHud = document.getElementById("phaseHud");
 
+    const imgCache = new Map();
+    function loadImage(src) {
+      if (imgCache.has(src)) return imgCache.get(src);
+      const p = new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error("fail " + src));
+        im.src = src;
+      });
+      imgCache.set(src, p);
+      return p;
+    }
+
     function todFromHour(h) {
       if (h >= 6 && h <= 8) return 0;
       if (h >= 17 && h <= 18) return 1;
       if (h >= 19 || h <= 4) return 2;
-      if (h === 5) return 0; // blue morning → sunrise
-      return 3; // day
+      if (h === 5) return 0;
+      return 3;
     }
     state.todIndex = todFromHour(new Date().getHours());
 
@@ -240,18 +276,29 @@
       tabs.appendChild(b);
     });
 
+    function usesEmptyPad() {
+      const p = state.phase;
+      return p === "assemble" || p === "grounded" || p === "liftoff";
+    }
+
     function plateSrc() {
       const tod = TODS[state.todIndex];
-      // liftoff uses grounded plate + FX; outcome uses mission plate
-      let phase = state.phase;
-      if (phase === "liftoff") phase = "grounded";
-      if (phase === "outcome") phase = "mission";
-      return `plates/${tod.id}-${phase}-${tod.file}.jpg`;
+      if (usesEmptyPad()) {
+        return `plates/empty/${tod.id}-empty-pad.jpg?v=compose1`;
+      }
+      // mission / outcome — existing mission stills
+      return `plates/${tod.id}-mission-${tod.file}.jpg`;
     }
 
     function kitSrc(partId) {
       const tod = TODS[state.todIndex].id;
-      return `kit/lit/${tod}/${partId}.png`;
+      // tray always prefers lit; fallback opaque root
+      return `kit/opaque/lit/${tod}/${partId}.png`;
+    }
+
+    function opaqueSrc(partId) {
+      const tod = TODS[state.todIndex].id;
+      return `kit/opaque/lit/${tod}/${partId}.png`;
     }
 
     function canLaunch() {
@@ -260,14 +307,216 @@
 
     function stackSummary() {
       const s = state.selected;
-      const bits = [
-        s.s1?.name || "—",
-        s.s2?.name || "—",
-        s.payload?.name || "—",
-      ];
+      const bits = [s.s1?.name || "—", s.s2?.name || "—", s.payload?.name || "—"];
       let line = bits.join(" / ");
-      if (s.boosters) line += ` + ${s.boosters.name}`;
+      if (s.boosters) {
+        if (s.boosters.id === "steel-booster") line += " + Steel Booster / Steel Ship";
+        else line += ` + ${s.boosters.name}`;
+      }
       return line;
+    }
+
+    function letterboxRect() {
+      const nw = plate.naturalWidth || NATIVE_W;
+      const nh = plate.naturalHeight || NATIVE_H;
+      const cw = plate.clientWidth;
+      const ch = plate.clientHeight;
+      if (!cw || !ch) return null;
+      const scale = Math.min(cw / nw, ch / nh);
+      const dw = nw * scale;
+      const dh = nh * scale;
+      // plate is centered in plateWrap via flex; letterbox is inside the img box
+      const plateOffX = plate.offsetLeft;
+      const plateOffY = plate.offsetTop;
+      const left = plateOffX + (cw - dw) / 2;
+      const top = plateOffY + (ch - dh) / 2;
+      return { left, top, width: dw, height: dh, scale, nw, nh };
+    }
+
+    function drawScaled(ctx, img, dx, dy, dw, dh) {
+      ctx.drawImage(img, dx, dy, dw, dh);
+    }
+
+    async function buildStackCanvas(nativeW, nativeH) {
+      // Compose selected rocket into a native-resolution offscreen canvas
+      const off = document.createElement("canvas");
+      off.width = nativeW;
+      off.height = nativeH;
+      const ctx = off.getContext("2d");
+      ctx.clearRect(0, 0, nativeW, nativeH);
+
+      const tod = TODS[state.todIndex].id;
+      const cx = CX[tod];
+      const sitY = SIT_Y;
+      const targetH = TARGET_H;
+      const sel = state.selected;
+      const boost = sel.boosters;
+
+      async function getPart(id) {
+        try {
+          return await loadImage(opaqueSrc(id));
+        } catch {
+          return await loadImage(`kit/opaque/${id}.png`);
+        }
+      }
+
+      // --- Steel Booster + Steel Ship (configs proof pattern) ---
+      if (boost?.id === "steel-booster") {
+        // Prefer precomposed stack sprite when present (wider, cleaner sit)
+        let pre = null;
+        try { pre = await getPart("steel-booster-ship"); } catch (_) {}
+        if (pre) {
+          const pw = Math.round(pre.naturalWidth * (targetH / pre.naturalHeight));
+          const x = Math.round(cx - pw / 2);
+          const y = Math.round(sitY - targetH);
+          ctx.drawImage(pre, x, y, pw, targetH);
+          return off;
+        }
+        const booster = await getPart("steel-booster");
+        let ship;
+        try { ship = await getPart("steel-ship"); }
+        catch { ship = await loadImage("kit/opaque/steel-ship.png"); }
+
+        const stack = document.createElement("canvas");
+        const bhFrac = 0.62, shFrac = 0.46;
+        const bh = Math.round(targetH * bhFrac);
+        const sh = Math.round(targetH * shFrac);
+        const bw = Math.round(booster.naturalWidth * (bh / booster.naturalHeight));
+        const sw = Math.round(ship.naturalWidth * (sh / ship.naturalHeight));
+        const cw = Math.max(bw, sw) + 4;
+        stack.width = cw;
+        stack.height = targetH;
+        const sctx = stack.getContext("2d");
+        sctx.drawImage(booster, (cw - bw) / 2, targetH - bh, bw, bh);
+        sctx.drawImage(ship, (cw - sw) / 2, 0, sw, sh);
+
+        const x = Math.round(cx - cw / 2);
+        const y = Math.round(sitY - targetH);
+        ctx.drawImage(stack, x, y);
+        return off;
+      }
+
+      // --- Core body from s1 (or fallbacks) ---
+      let coreId = sel.s1?.id || null;
+      if (!coreId && boost?.id === "gridfin-booster") coreId = "gridfin-booster";
+      if (!coreId && sel.s2) coreId = sel.s2.id;
+      if (!coreId && sel.payload) coreId = sel.payload.id;
+      if (!coreId) return off;
+
+      const core = await getPart(coreId);
+      let coreW = Math.round(core.naturalWidth * (targetH / core.naturalHeight));
+      let coreH = targetH;
+
+      // Optional thin uppers (euro / orange) above non-steel cores — shrink into tip band
+      const layers = [{ img: core, w: coreW, h: coreH }];
+
+      // Gridfin side boosters
+      if (boost?.id === "gridfin-booster") {
+        let side;
+        try { side = await getPart("side-boost"); }
+        catch { side = null; }
+
+        if (side) {
+          const sh = Math.round(targetH * 0.92);
+          const sw = Math.round(side.naturalWidth * (sh / side.naturalHeight));
+          const gap = Math.max(2, Math.round(sw / 8));
+          const canvasW = coreW + 2 * (sw + gap);
+          const g = document.createElement("canvas");
+          g.width = canvasW;
+          g.height = targetH;
+          const gctx = g.getContext("2d");
+          // left
+          gctx.drawImage(side, 0, targetH - sh, sw, sh);
+          // core center
+          gctx.drawImage(core, (canvasW - coreW) / 2, 0, coreW, coreH);
+          // right (mirror)
+          gctx.save();
+          gctx.translate(canvasW, 0);
+          gctx.scale(-1, 1);
+          gctx.drawImage(side, 0, targetH - sh, sw, sh);
+          gctx.restore();
+
+          const x = Math.round(cx - canvasW / 2);
+          const y = Math.round(sitY - targetH);
+          ctx.drawImage(g, x, y);
+          return off;
+        }
+
+        // No side sprite: composite two gridfin boosters flanking a thinner core look
+        // by drawing gridfin as the visible stack (wider than pencil)
+        const gf = coreId === "gridfin-booster" ? core : await getPart("gridfin-booster");
+        const gfW = Math.round(gf.naturalWidth * (targetH / gf.naturalHeight));
+        const x = Math.round(cx - gfW / 2);
+        const y = Math.round(sitY - targetH);
+        ctx.drawImage(gf, x, y, gfW, targetH);
+        return off;
+      }
+
+      // Plain core (Moon Giant / Pencil Core / etc.)
+      {
+        const x = Math.round(cx - coreW / 2);
+        const y = Math.round(sitY - targetH);
+        ctx.drawImage(core, x, y, coreW, coreH);
+      }
+      return off;
+    }
+
+    let composeToken = 0;
+    async function paintStack() {
+      const token = ++composeToken;
+      const show = usesEmptyPad() && (
+        state.selected.s1 || state.selected.s2 ||
+        state.selected.payload || state.selected.boosters
+      );
+      if (!show) {
+        stackEl.classList.remove("on", "liftoff");
+        stackEl.style.display = "none";
+        return;
+      }
+
+      const lb = letterboxRect();
+      if (!lb || !plate.naturalWidth) {
+        stackEl.classList.add("on");
+        return;
+      }
+
+      try {
+        const composed = await buildStackCanvas(lb.nw, lb.nh);
+        if (token !== composeToken) return;
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        stackEl.width = Math.round(lb.width * dpr);
+        stackEl.height = Math.round(lb.height * dpr);
+        stackEl.style.left = lb.left + "px";
+        stackEl.style.top = lb.top + "px";
+        stackEl.style.width = lb.width + "px";
+        stackEl.style.height = lb.height + "px";
+        stackEl.style.display = "block";
+        stackEl.classList.add("on");
+        if (state.phase !== "liftoff") stackEl.classList.remove("liftoff");
+
+        const ctx = stackEl.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, lb.width, lb.height);
+        ctx.drawImage(composed, 0, 0, lb.width, lb.height);
+
+        // Position flames near stack base during liftoff
+        if (state.phase === "liftoff") {
+          const tod = TODS[state.todIndex].id;
+          const cx = CX[tod];
+          const flameX = lb.left + (cx / lb.nw) * lb.width;
+          const flameY = lb.top + (SIT_Y / lb.nh) * lb.height;
+          fx.style.alignItems = "flex-start";
+          fx.style.justifyContent = "flex-start";
+          const flames = document.getElementById("flames");
+          flames.style.position = "absolute";
+          flames.style.left = (flameX - flames.offsetWidth / 2) + "px";
+          flames.style.top = (flameY - 8) + "px";
+          flames.style.marginBottom = "0";
+        }
+      } catch (e) {
+        console.warn("compose failed", e);
+      }
     }
 
     function renderTabs() {
@@ -283,7 +532,9 @@
         el.innerHTML = `<img alt="" src="${kitSrc(p.id)}" /><div class="name">${p.name}</div>`;
         el.addEventListener("click", () => {
           if (state.phase !== "assemble") return;
-          state.selected[p.role] = p;
+          // toggle same card off, else select
+          if (state.selected[p.role]?.id === p.id) state.selected[p.role] = null;
+          else state.selected[p.role] = p;
           render();
         });
         cards.appendChild(el);
@@ -317,8 +568,14 @@
     function render() {
       const tod = TODS[state.todIndex];
       const src = plateSrc();
-      if (plate.getAttribute("src") !== src) plate.src = src;
-      meta.textContent = `${tod.id} ${tod.label} · ${state.phase.toUpperCase()} · locked plate`;
+      const prev = plate.getAttribute("src");
+      if (prev !== src) {
+        plate.onload = () => paintStack();
+        plate.src = src;
+      } else {
+        paintStack();
+      }
+      meta.textContent = `${tod.id} ${tod.label} · ${state.phase.toUpperCase()} · live compose`;
       [...todRow.children].forEach((b, i) => b.classList.toggle("active", i === state.todIndex));
       renderTabs();
       renderCards();
@@ -346,8 +603,13 @@
       await sleep(350);
       state.phase = "liftoff";
       render();
+      // kick CSS liftoff after paint
+      requestAnimationFrame(() => {
+        stackEl.classList.add("liftoff");
+      });
       await sleep(2200);
       state.phase = "mission";
+      stackEl.classList.remove("liftoff");
       render();
     };
 
@@ -370,11 +632,17 @@
     document.getElementById("restartBtn").onclick = () => {
       state.phase = "assemble";
       state.missionChoice = null;
-      state.selected = { s1: null, s2: null, payload: null, boosters: null };
+      state.selected = {
+        s1: PARTS.s1[0],
+        s2: PARTS.s2[0],
+        payload: PARTS.payload[0],
+        boosters: PARTS.boosters[1],
+      };
       state.todIndex = todFromHour(new Date().getHours());
       render();
     };
 
+    window.addEventListener("resize", () => paintStack());
     render();
   </script>
 </body>
