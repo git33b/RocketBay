@@ -47,7 +47,7 @@
       position: absolute; inset: 0;
       overflow: hidden; /* cover crop */
     }
-    #plateWrap.liftoffClimb {
+    #plateWrap.liftoffClimb, #plateWrap.assembleOpen {
       overflow: visible;
     }
     #stack {
@@ -110,22 +110,49 @@
     button.primary:disabled { background: rgba(120,120,120,.45); cursor: not-allowed; }
     button.cyan { background: rgba(0,180,220,.45); }
     button.ghost { background: rgba(255,255,255,.1); }
-    #tabs button { min-width: 72px; }
-    #cards {
-      display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px;
-      -webkit-overflow-scrolling: touch;
+    /* ---- MODULAR-BUILD step builder (phone first) ---- */
+    #steps { display: flex; gap: 5px; justify-content: center; }
+    #steps button { flex: 1 1 0; min-width: 0; padding: 7px 4px; font-size: 10px; letter-spacing: .02em; white-space: nowrap; }
+    #steps button.done::after { content: " \2713"; color: #7dffa8; }
+    #steps button.active { background: rgba(0,200,224,.55); }
+    #tray {
+      display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 4px; scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch; min-height: 76px;
     }
     .card {
-      flex: 0 0 auto; width: 108px; padding: 6px;
-      background: rgba(255,255,255,.1); border-radius: 8px;
-      border: 2px solid transparent; text-align: center;
+      position: relative; flex: 0 0 auto; width: 74px; height: 76px; padding: 3px 3px 4px;
+      background: rgba(255,255,255,.1); border-radius: 8px; scroll-snap-align: start;
+      border: 2px solid transparent; text-align: center; display: flex; flex-direction: column; align-items: center;
     }
     .card.selected { border-color: var(--cyan); background: rgba(0,200,224,.22); }
-    .card img {
-      width: 100%; height: 64px; object-fit: contain; display: block;
-      image-rendering: auto; background: rgba(0,0,0,.25); border-radius: 4px;
+    .card.blocked { opacity: .42; filter: grayscale(1); }
+    .card.blocked::after {
+      content: "\2715"; position: absolute; top: 2px; right: 4px; font-size: 10px; color: #ff8a7a;
     }
-    .card .name { font-size: 10px; margin-top: 5px; line-height: 1.2; font-weight: 700; }
+    .card.flash { border-color: #ff8a7a; opacity: .75; }
+    .card img {
+      height: 44px; width: 68px; object-fit: contain; display: block; image-rendering: pixelated;
+      background: rgba(0,0,0,.28); border-radius: 4px;
+    }
+    .card.wide { width: 104px; }
+    .card .name { font-size: 9px; margin-top: 3px; line-height: 1.1; font-weight: 700; max-height: 22px; overflow: hidden; }
+    #reason {
+      height: 26px; font-size: 10px; line-height: 13px; text-align: center; opacity: .92;
+      overflow: hidden; display: flex; align-items: center; justify-content: center;
+    }
+    #reason.warn { color: #ffb4a6; }
+    #reason.ok { color: #9dfcc0; }
+    #actRow button { padding: 9px 10px; }
+    #launchBtn { min-width: 128px; }
+    #todRow button { min-width: 0; padding: 6px 8px; font-size: 10px; }
+    #world.assembleZoom { transition: transform .45s ease; }
+    @media (orientation: landscape) and (max-height: 560px) {
+      #chrome.building {
+        left: auto; right: 0; top: 0; width: 318px; max-height: none;
+        background: linear-gradient(90deg, transparent, rgba(0,0,0,.9) 16%);
+        padding: 8px 10px 8px 26px; justify-content: flex-end;
+      }
+    }
     #ops {
       display: none; gap: 6px; flex-wrap: wrap; justify-content: center;
     }
@@ -142,7 +169,6 @@
       font-size: 18px; font-weight: 900; letter-spacing: .06em; color: #ffe08a;
     }
     #meta { text-align: center; font-size: 10px; opacity: .8; letter-spacing: .03em; }
-    #todRow button { min-width: 64px; }
     #soundBtn { min-width: 72px; font-size: 10px; }
     #soundBtn.on { background: rgba(0,180,220,.55); }
     #launchBtn.holding { background: rgba(255,80,0,.95); transform: scale(0.98); }
@@ -172,9 +198,11 @@
     <div class="row" id="todRow"></div>
 
     <div id="assembleUI">
-      <div class="row" id="tabs"></div>
-      <div id="cards"></div>
-      <div class="row">
+      <div id="steps" role="tablist"></div>
+      <div id="tray" aria-label="Pieces"></div>
+      <div id="reason" aria-live="polite"></div>
+      <div class="row" id="actRow">
+        <button type="button" class="ghost" id="undoBtn">UNDO</button>
         <button type="button" class="ghost" id="clearBtn">CLEAR</button>
         <button type="button" class="ghost" id="soundBtn" title="Rumble audio (muted by default)">SOUND OFF</button>
         <button type="button" class="primary" id="launchBtn" disabled>GO FOR LAUNCH</button>
@@ -198,102 +226,55 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="liftoff.js?v=liftoff48"></script>
+  <script src="modular.js?v=modular1"></script>
+  <script src="liftoff.js?v=liftoff49"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
-    const KIT_VER = "compose4";
+    const KIT_VER = "modular1";
     const PAD_VER = "pad5";
-    const APP_VER = "liftoff48";
+    const APP_VER = "liftoff49";
+    const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
+    const MB = window.RocketBayModular;
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
-      // Fallback if pad-config.js failed to load
-      return {
-        cx: 640, sitY: 548, deckY: 548, targetH: 500,
-        nozzleOffsetY: 0, smokeOriginY: 548,
-        emptyPad: "plates/empty/" + todId + "-empty-pad-v5.png",
-      };
+      return { cx: 640, sitY: 600, deckY: 600, targetH: 500, nozzleOffsetY: 0, smokeOriginY: 600,
+        emptyPad: "plates/empty/" + todId + "-empty-pad-v5.png" };
     }
 
     const TODS = [
-      { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
-      { id: "03", label: "SUNSET", file: "sunset", hourHint: [17, 18] },
-      { id: "04", label: "NIGHT", file: "night", hourHint: [19, 20, 21, 22, 23, 0, 1, 2, 3, 4] },
-      { id: "05", label: "DAY", file: "day", hourHint: [9, 10, 11, 12, 13, 14, 15, 16] },
+      { id: "02", label: "SUNRISE", file: "sunrise" },
+      { id: "03", label: "SUNSET", file: "sunset" },
+      { id: "04", label: "NIGHT", file: "night" },
+      { id: "05", label: "DAY", file: "day" },
     ];
-
-    const PARTS = {
-      s1: [
-        { id: "moon-giant", name: "Moon Giant", role: "s1" },
-        { id: "pencil-core", name: "Pencil Core", role: "s1" },
-      ],
-      s2: [
-        { id: "euro-core", name: "Euro Core", role: "s2" },
-      ],
-      payload: [
-        { id: "orange-tank", name: "Orange Tank", role: "payload" },
-      ],
-      boosters: [
-        { id: "gridfin-booster", name: "Gridfin Booster", role: "boosters" },
-        { id: "steel-booster", name: "Steel Booster", role: "boosters" },
-      ],
-    };
-    const ROLE_TABS = [
-      { key: "s1", label: "1ST STAGE" },
-      { key: "s2", label: "2ND STAGE" },
-      { key: "payload", label: "PAYLOAD" },
-      { key: "boosters", label: "BOOSTERS" },
+    const SLOTS = [
+      { key: "s1", type: "first_stage", label: "1 FIRST STAGE" },
+      { key: "upper", type: "upper", label: "2 UPPER" },
+      { key: "payload", type: "payload", label: "3 PAYLOAD" },
+      { key: "sides", type: "side_booster", label: "+ BOOSTERS" },
     ];
+    const SIDE_IDS = ["side-booster-left", "side-booster-right"];
+    const EMPTY_BUILD = () => ({ s1: null, upper: null, payload: null, sides: false });
 
     const state = {
       todIndex: 0,
       phase: "assemble",
-      tab: "s1",
-      selected: {
-        s1: PARTS.s1[0],
-        s2: PARTS.s2[0],
-        payload: PARTS.payload[0],
-        boosters: null, // start without steel so s1 is visible; user can pick Steel
-      },
+      step: "s1",
+      build: EMPTY_BUILD(),
+      history: [],
+      swapSlot: null,
       missionChoice: null,
     };
+    let KIT = null;
 
-    const plate = document.getElementById("plate");
-    const plateWrap = document.getElementById("plateWrap");
-    const stackEl = document.getElementById("stack");
-    const worldEl = document.getElementById("world");
-    const skyExt = document.getElementById("skyExt");
-    const fxCanvas = document.getElementById("fxCanvas");
-    const countdownHud = document.getElementById("countdownHud");
-    const meta = document.getElementById("meta");
-    const todRow = document.getElementById("todRow");
-    const tabs = document.getElementById("tabs");
-    const cards = document.getElementById("cards");
-    const launchBtn = document.getElementById("launchBtn");
-    const assembleUI = document.getElementById("assembleUI");
-    const opsEl = document.getElementById("ops");
-    const missionBox = document.getElementById("missionBox");
-    const outcomeBox = document.getElementById("outcomeBox");
-    const stackHud = document.getElementById("stackHud");
-    const phaseHud = document.getElementById("phaseHud");
-
-    const imgCache = new Map();
-    function loadImage(src) {
-      if (imgCache.has(src)) return imgCache.get(src);
-      const p = new Promise((resolve, reject) => {
-        const im = new Image();
-        im.decoding = "async";
-        im.onload = async () => {
-          try { if (im.decode) await im.decode(); } catch (_) {}
-          resolve(im);
-        };
-        im.onerror = () => reject(new Error("fail " + src));
-        im.src = src;
-      });
-      imgCache.set(src, p);
-      return p;
-    }
+    const $ = (id) => document.getElementById(id);
+    const plate = $("plate"), plateWrap = $("plateWrap"), stackEl = $("stack"), worldEl = $("world");
+    const skyExt = $("skyExt"), fxCanvas = $("fxCanvas"), countdownHud = $("countdownHud");
+    const meta = $("meta"), todRow = $("todRow"), stepsEl = $("steps"), trayEl = $("tray"), reasonEl = $("reason");
+    const launchBtn = $("launchBtn"), assembleUI = $("assembleUI"), opsEl = $("ops"), chromeEl = $("chrome");
+    const missionBox = $("missionBox"), outcomeBox = $("outcomeBox"), stackHud = $("stackHud"), phaseHud = $("phaseHud");
 
     function todFromHour(h) {
       if (h >= 6 && h <= 8) return 0;
@@ -303,452 +284,429 @@
       return 3;
     }
     state.todIndex = todFromHour(new Date().getHours());
+    const QS = new URLSearchParams(location.search);
+    if (QS.get("tod")) { const i = TODS.findIndex((t) => t.id === QS.get("tod")); if (i >= 0) state.todIndex = i; }
     plate.addEventListener("load", () => { applyPlateMap(); });
 
     TODS.forEach((t, i) => {
       const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = t.label;
-      b.addEventListener("click", () => { state.todIndex = i; render(); });
+      b.type = "button"; b.textContent = t.label;
+      b.addEventListener("click", () => { if (state.phase !== "assemble") return; state.todIndex = i; rebuildRocket(null); render(); });
       todRow.appendChild(b);
     });
-
-    ROLE_TABS.forEach((t) => {
+    SLOTS.forEach((s) => {
       const b = document.createElement("button");
-      b.type = "button";
-      b.dataset.tab = t.key;
-      b.textContent = t.label;
-      b.addEventListener("click", () => { state.tab = t.key; renderCards(); renderTabs(); });
-      tabs.appendChild(b);
+      b.type = "button"; b.dataset.slot = s.key; b.textContent = s.label;
+      b.addEventListener("click", () => { state.step = s.key; state.swapSlot = null; renderBuilder(); paintStack(); });
+      stepsEl.appendChild(b);
     });
 
-    function usesEmptyPad() {
-      const p = state.phase;
-      return p === "assemble" || p === "grounded" || p === "liftoff";
-    }
-
+    function usesEmptyPad() { const p = state.phase; return p === "assemble" || p === "grounded" || p === "liftoff"; }
     function plateSrc() {
       const tod = TODS[state.todIndex];
-      if (usesEmptyPad()) {
-        const cfg = padCfg(tod.id);
-        return `${cfg.emptyPad}?v=${PAD_VER}`;
-      }
+      if (usesEmptyPad()) return `${padCfg(tod.id).emptyPad}?v=${PAD_VER}`;
       return `plates/${tod.id}-mission-${tod.file}.jpg`;
     }
 
-    function kitSrc(partId) {
-      const tod = TODS[state.todIndex].id;
-      return `kit/opaque/lit/${tod}/${partId}.png?v=${KIT_VER}`;
+    /* ---------------- build model ---------------- */
+    const M = () => KIT.metas;
+    const lbl = (id) => (KIT && KIT.metas[id] ? KIT.metas[id].label : id);
+    let _idRe = null;
+    function prettyReason(txt) {
+      if (!KIT) return txt;
+      if (!_idRe) _idRe = new RegExp(Object.keys(KIT.metas).sort((a, b) => b.length - a.length).map((id) => id.replace(/[-]/g, "\\-")).join("|"), "g");
+      return String(txt).replace(_idRe, (id) => lbl(id));
     }
-
-    function opaqueSrc(partId) {
-      const tod = TODS[state.todIndex].id;
-      return `kit/opaque/lit/${tod}/${partId}.png?v=${KIT_VER}`;
+    const idsOf = (b) => [b.s1, b.upper, b.payload].filter(Boolean);
+    const sidesOf = (b) => (b.sides ? SIDE_IDS : null);
+    const isComplete = (b) => !!(b.s1 && b.upper && (b.payload || M()[b.upper].selfTopped));
+    const hCache = new Map();
+    function stackHeight(b) {
+      if (!b.s1) return 0;
+      const key = idsOf(b).join(",") + (b.sides ? "+S" : "");
+      if (!hCache.has(key)) hCache.set(key, MB.composeStack(KIT.pieces, KIT.metas, idsOf(b), sidesOf(b)).height);
+      return hCache.get(key);
     }
-
-    function canLaunch() {
-      return !!(state.selected.s1 && state.selected.s2 && state.selected.payload);
+    function pairWhy(top, bot) {
+      const r = MB.checkPair(M()[top], M()[bot]);
+      if (r[0]) return null;
+      return KIT.disallowed[top + "|" + bot] || r[1];
     }
-
-    function hasAnyParts() {
-      const s = state.selected;
-      return !!(s.s1 || s.s2 || s.payload || s.boosters);
-    }
-
-    function stackSummary() {
-      const s = state.selected;
-      if (!hasAnyParts()) return "Select parts";
-      const bits = [s.s1?.name || "—", s.s2?.name || "—", s.payload?.name || "—"];
-      let line = bits.join(" / ");
-      if (s.boosters) {
-        if (s.boosters.id === "steel-booster") line += " + Steel Booster / Steel Ship";
-        else line += ` + ${s.boosters.name}`;
+    function budgetFor() { const cfg = padCfg(TODS[state.todIndex].id); return cfg.sitY - TIP_MIN_Y; }
+    /** partial validity: pairs + strap-ons + height budget (with feasible completion) */
+    function validate(b, depth) {
+      if (b.upper && !b.s1) return "pick a first stage first";
+      if (b.payload && !b.upper) return "pick an upper stage first";
+      if (b.s1 && b.upper) { const w = pairWhy(b.upper, b.s1); if (w) return w; }
+      if (b.upper && b.payload) { const w = pairWhy(b.payload, b.upper); if (w) return w; }
+      if (b.sides && b.s1 && M()[b.s1].strapOns) return `${b.s1} already carries native strap-ons; use its -bare variant`;
+      if (b.s1) {
+        const H = stackHeight(b), maxH = budgetFor();
+        if (H > maxH) return `too tall for this pad: ${H}px stack puts the tip at y=${padCfg(TODS[state.todIndex].id).sitY - H} (budget y\u2265${TIP_MIN_Y})`;
+        if (!depth && !isComplete(b) && !canComplete(b)) return `no upper/payload fits the y\u2265${TIP_MIN_Y} height budget on this pad`;
       }
-      return line;
+      return null;
+    }
+    function canComplete(b) {
+      const ups = b.upper ? [b.upper] : KIT.kit.pieces.filter((p) => p.type === "upper").map((p) => p.id);
+      for (const u of ups) {
+        const nb = Object.assign({}, b, { upper: u });
+        if (validate(nb, 1)) continue;
+        if (M()[u].selfTopped) { if (!nb.payload) return true; continue; }
+        const pays = nb.payload ? [nb.payload] : KIT.kit.pieces.filter((p) => p.type === "payload").map((p) => p.id);
+        for (const p of pays) if (!validate(Object.assign({}, nb, { payload: p }), 1)) return true;
+      }
+      return false;
+    }
+    function applyPick(b, slot, id) {
+      const nb = Object.assign({}, b);
+      if (slot === "sides") nb.sides = id === "__pair";
+      else nb[slot] = id;
+      if (slot === "upper" && M()[id].selfTopped) nb.payload = null; // Steel Ship ends the stack
+      return nb;
+    }
+    function evalCandidate(slot, id) {
+      const b = state.build;
+      if (slot === "upper" && !b.s1) return "pick a first stage first";
+      if (slot === "payload") {
+        if (!b.upper) return "pick an upper stage first";
+        if (M()[b.upper].selfTopped) return pairWhy(id, b.upper) || `${b.upper} ends the stack`;
+      }
+      if (slot === "sides" && !b.s1) return "pick a first stage first";
+      if (slot === "sides" && id === "__none") return null;
+      return validate(applyPick(b, slot, id), 0);
+    }
+    function traysFor(slot) {
+      if (slot === "sides") return [
+        { id: "__none", label: "No side boosters", imgs: [] },
+        { id: "__pair", label: `${lbl(SIDE_IDS[0])} + ${lbl(SIDE_IDS[1])}`, imgs: SIDE_IDS.map((i) => KIT.pieces[i].src) },
+      ];
+      const t = SLOTS.find((s) => s.key === slot).type;
+      return KIT.kit.pieces.filter((p) => p.type === t).map((p) => ({ id: p.id, label: p.label, imgs: [KIT.pieces[p.id].src] }));
+    }
+    function isSelected(slot, id) {
+      const b = state.build;
+      if (slot === "sides") return id === (b.sides ? "__pair" : "__none") && !!b.s1;
+      return b[slot] === id;
+    }
+    function nextStep(b, slot) {
+      if (slot === "s1") return b.upper ? (isComplete(b) ? "sides" : "payload") : "upper";
+      if (slot === "upper") return M()[b.upper].selfTopped ? "sides" : (b.payload ? "sides" : "payload");
+      if (slot === "payload") return "sides";
+      return "sides";
+    }
+    function setReason(txt, cls) { reasonEl.textContent = txt || ""; reasonEl.className = cls || ""; }
+    function summaryLine() {
+      const b = state.build;
+      if (!KIT) return "Loading kit\u2026";
+      if (!b.s1) return "Pick a first stage";
+      const parts = idsOf(b).map(lbl);
+      let s = parts.join(" + ") + (b.sides ? " + side boosters" : "");
+      const H = stackHeight(b), sit = padCfg(TODS[state.todIndex].id).sitY;
+      s += ` \u00b7 ${H}px, tip y=${sit - H}`;
+      if (!isComplete(b)) s += b.upper ? " \u00b7 add a payload" : " \u00b7 add an upper stage";
+      return s;
     }
 
-    /**
-     * Cover-style plate mapping (shared by plate, stack, FX, config coords).
-     * Landscape: cover, crop top/bottom as needed, centered.
-     * Portrait: cover, horizontal crop centered on TOD CX (clamped).
-     */
+    function pick(slot, id) {
+      if (state.phase !== "assemble" || !KIT) return;
+      const why = evalCandidate(slot, id);
+      if (why) { setReason("\u2715 " + prettyReason(why), "warn"); return false; }
+      if (isSelected(slot, id) && state.swapSlot !== slot) { state.step = nextStep(state.build, slot); state.swapSlot = null; renderBuilder(); return true; }
+      const prev = state.build;
+      const nb = applyPick(prev, slot, id);
+      state.history.push(prev);
+      if (state.history.length > 60) state.history.shift();
+      state.build = nb;
+      state.swapSlot = null;
+      state.step = nextStep(nb, slot);
+      rebuildRocket(prev);
+      renderBuilder();
+      setChrome();
+      return true;
+    }
+
+    function renderBuilder() {
+      const b = state.build;
+      [...stepsEl.children].forEach((el) => {
+        const k = el.dataset.slot;
+        el.classList.toggle("active", k === state.step);
+        const done = k === "sides" ? b.sides : (k === "payload" ? !!b.payload || (b.upper && M() && KIT && M()[b.upper].selfTopped) : !!b[k]);
+        el.classList.toggle("done", !!done && !!KIT);
+      });
+      trayEl.innerHTML = "";
+      if (!KIT) { setReason("Loading kit\u2026"); return; }
+      const cards = traysFor(state.step);
+      let firstBlocked = null;
+      cards.forEach((c) => {
+        const why = evalCandidate(state.step, c.id);
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = "card" + (c.imgs.length > 1 ? " wide" : "") + (isSelected(state.step, c.id) ? " selected" : "") + (why ? " blocked" : "");
+        el.dataset.id = c.id;
+        el.setAttribute("aria-disabled", why ? "true" : "false");
+        const img = c.imgs.length
+          ? (c.imgs.length === 1 ? `<img alt="" src="${c.imgs[0]}" />`
+             : `<div style="display:flex;gap:2px;height:44px;width:68px;justify-content:center;background:rgba(0,0,0,.28);border-radius:4px">${c.imgs.map((s) => `<img alt="" src="${s}" style="width:30px;background:none" />`).join("")}</div>`)
+          : `<div style="height:44px;width:68px;display:flex;align-items:center;justify-content:center;font-size:18px;opacity:.6;background:rgba(0,0,0,.28);border-radius:4px">\u2205</div>`;
+        el.innerHTML = img + `<div class="name">${c.label}</div>`;
+        if (why && !firstBlocked) firstBlocked = why;
+        el.addEventListener("click", () => {
+          const ok = pick(state.step, c.id);
+          if (ok === false) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 500); }
+        });
+        trayEl.appendChild(el);
+      });
+      if (state.swapSlot) setReason(`Swap ${state.swapSlot === "sides" ? "side boosters" : lbl(state.build[state.swapSlot])}: pick a replacement`, "ok");
+      else setReason(summaryLine(), isComplete(b) ? "ok" : "");
+      $("undoBtn").disabled = !state.history.length;
+    }
+
+    /* ---------------- rocket composition + drop-in ---------------- */
+    let rocket = null;
+    const DROP_N = 64, DROP_MS = 460;
+    function slotOfLayer(L, b) {
+      if (L.kind === "side") return "sides";
+      if (L.kind === "frustum") return L.joinOf === b.payload ? "payload" : "upper";
+      if (L.name === b.s1) return "s1";
+      if (L.name === b.upper) return "upper";
+      return "payload";
+    }
+    function rebuildRocket(prevBuild) {
+      const b = state.build;
+      if (!KIT || !b.s1) { rocket = null; paintStack(); return; }
+      const tod = TODS[state.todIndex].id, cfg = padCfg(tod), L = KIT.lighting, lc = L.tods[tod];
+      const st = MB.composeStack(KIT.pieces, KIT.metas, idsOf(b), sidesOf(b));
+      const lit = MB.light(st, lc, L.kitMean, L.kitStd);
+      const seat = MB.seatPos({ w: st.w, h: st.h, data: lit, axisX: st.axisX }, cfg.cx, cfg.sitY);
+      const slotIdx = st.layers.map((Ly) => slotOfLayer(Ly, b));
+      // which slots drop in
+      let anim = new Set();
+      if (prevBuild) {
+        const order = ["s1", "upper", "payload"];
+        const changed = order.filter((k) => prevBuild[k] !== b[k] && b[k]);
+        if (changed.length) {
+          const lo = order.indexOf(changed[0]);
+          order.slice(lo).forEach((k) => anim.add(k));
+          if (changed[0] === "s1" && b.sides) anim.add("sides");
+        }
+        if (prevBuild.sides !== b.sides && b.sides) anim.add("sides");
+      }
+      const mk = (pred) => {
+        const c = document.createElement("canvas"); c.width = st.w; c.height = st.h;
+        const img = new ImageData(st.w, st.h);
+        for (let i = 0; i < st.w * st.h; i++) {
+          const o = st.owner[i]; if (!o || !pred(slotIdx[o - 1])) continue;
+          img.data[i * 4] = lit[i * 4]; img.data[i * 4 + 1] = lit[i * 4 + 1]; img.data[i * 4 + 2] = lit[i * 4 + 2]; img.data[i * 4 + 3] = 255;
+        }
+        c.getContext("2d").putImageData(img, 0, 0);
+        return c;
+      };
+      const staticCv = mk((s) => !anim.has(s)), movingCv = anim.size ? mk((s) => anim.has(s)) : null;
+      // contact shadow (drawn on the pad only while grounded)
+      const inR = (x, y) => { const lx = x - seat.left, ly = y - seat.top; return lx >= 0 && ly >= 0 && lx < st.w && ly < st.h && lit[(ly * st.w + lx) * 4 + 3] > 0; };
+      const sh = MB.contactShadow(inR, cfg.sitY);
+      let shadowCv = null, shadowRect = null;
+      if (sh.length) {
+        const x0 = Math.min(...sh.map((p) => p.x)), x1 = Math.max(...sh.map((p) => p.x));
+        const y0 = cfg.sitY - 2;
+        shadowCv = document.createElement("canvas"); shadowCv.width = x1 - x0 + 1; shadowCv.height = 5;
+        const si = new ImageData(shadowCv.width, 5);
+        sh.forEach((p) => { const o = ((p.y - y0) * shadowCv.width + (p.x - x0)) * 4; si.data[o + 3] = Math.round((1 - p.f) * 255); });
+        shadowCv.getContext("2d").putImageData(si, 0, 0);
+        shadowRect = { x: x0, y: y0 };
+      }
+      // flight hooks: nozzles at the first stage bottom + each side booster foot
+      const core = st.layers[0];
+      const edgeMid = (id, lay) => lay.x + MB.edgeRowMid(KIT.pieces[id], false);
+      const coreMid = seat.left + edgeMid(b.s1, core);
+      const nozzles = [coreMid - cfg.cx], scales = [1];
+      const coreW = KIT.metas[b.s1].joinBottomWidth;
+      st.layers.forEach((Ly) => {
+        if (Ly.kind !== "side") return;
+        nozzles.push(seat.left + edgeMid(Ly.name, Ly) - cfg.cx);
+        scales.push(Math.max(0.34, KIT.metas[Ly.name].joinBottomWidth / coreW));
+      });
+      let bx0 = 1e9, bx1 = -1;
+      for (let x = 0; x < st.w; x++) if (lit[((st.h - 1) * st.w + x) * 4 + 3]) { bx0 = Math.min(bx0, x); bx1 = x; }
+      lastSeat = {
+        cx: cfg.cx, sitY: cfg.sitY, deckY: cfg.deckY, nozzleY: cfg.sitY, smokeY: cfg.smokeOriginY,
+        width: Math.max(40, bx1 - bx0 + 1), nozzles, nozzleScales: scales, hullW: coreW,
+        stackH: st.h, tipY: seat.top, nw: NATIVE_W, nh: NATIVE_H, targetH: st.h,
+      };
+      rocket = { left: seat.left, top: seat.top, w: st.w, h: st.h, owner: st.owner, slotIdx, staticCv, movingCv, shadowCv, shadowRect,
+        anim: anim.size ? { t0: performance.now(), set: anim } : null, outline: null, outlineSlot: null, ids: idsOf(b), sides: b.sides, layers: st.layers, joins: st.joins };
+      window.__modularState = { build: Object.assign({}, b), stackH: st.h, stackW: st.w, seat, joins: st.joins, layers: st.layers, nozzles, scales, tipY: seat.top };
+      if (rocket.anim) requestAnimationFrame(animTick); else paintStack();
+    }
+    function outlineFor(slot) {
+      if (!rocket) return null;
+      if (rocket.outlineSlot === slot) return rocket.outline;
+      const { w, h, owner, slotIdx } = rocket;
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const img = new ImageData(w, h);
+      const inS = (x, y) => x >= 0 && y >= 0 && x < w && y < h && owner[y * w + x] && slotIdx[owner[y * w + x] - 1] === slot;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        if (!inS(x, y)) continue;
+        if (inS(x - 1, y) && inS(x + 1, y) && inS(x, y - 1) && inS(x, y + 1)) continue;
+        const o = (y * w + x) * 4; img.data[o] = 0; img.data[o + 1] = 230; img.data[o + 2] = 255; img.data[o + 3] = 255;
+      }
+      c.getContext("2d").putImageData(img, 0, 0);
+      rocket.outline = c; rocket.outlineSlot = slot;
+      return c;
+    }
+    function animTick() {
+      paintStack();
+      if ((rocket && rocket.anim) || (state.swapSlot && state.phase === "assemble")) requestAnimationFrame(animTick);
+    }
+
+    let lastSeat = { cx: 640, sitY: 600, deckY: 600, nozzleY: 600, smokeY: 600, width: 100, nozzles: [0], nozzleScales: [1], nw: NATIVE_W, nh: NATIVE_H };
+
     function plateMap() {
       const nw = plate.naturalWidth || NATIVE_W;
       const nh = plate.naturalHeight || NATIVE_H;
-      const wrap = plateWrap;
-      const cw = wrap.clientWidth || window.innerWidth;
-      const ch = wrap.clientHeight || window.innerHeight;
+      const cw = plateWrap.clientWidth || window.innerWidth;
+      const ch = plateWrap.clientHeight || window.innerHeight;
       if (!cw || !ch) return null;
-      const scale = Math.max(cw / nw, ch / nh); // cover
-      const dw = nw * scale;
-      const dh = nh * scale;
+      const scale = Math.max(cw / nw, ch / nh);
+      const dw = nw * scale, dh = nh * scale;
       let left, top;
-      if (cw >= ch) {
-        // landscape: center both axes (usually crop top/bottom)
-        left = (cw - dw) / 2;
-        top = (ch - dh) / 2;
-      } else {
-        // portrait: center horizontally on pad CX
-        const tod = TODS[state.todIndex].id;
-        const cfg = padCfg(tod);
-        const cxCss = (cfg.cx / nw) * dw;
-        left = cw / 2 - cxCss;
+      if (cw >= ch) { left = (cw - dw) / 2; top = (ch - dh) / 2; }
+      else {
+        const cfg = padCfg(TODS[state.todIndex].id);
+        left = cw / 2 - (cfg.cx / nw) * dw;
         left = Math.min(0, Math.max(cw - dw, left));
         top = (ch - dh) / 2;
       }
       return { left: Math.round(left), top: Math.round(top), width: Math.round(dw), height: Math.round(dh), scale, nw, nh, cw, ch, cover: true };
     }
-    // Back-compat alias
     function letterboxRect() { return plateMap(); }
     window.plateMap = plateMap;
-
     function applyPlateMap() {
       const lb = plateMap();
       if (!lb) return null;
-      plate.style.left = Math.round(lb.left) + "px";
-      plate.style.top = Math.round(lb.top) + "px";
-      plate.style.width = Math.round(lb.width) + "px";
-      plate.style.height = Math.round(lb.height) + "px";
+      plate.style.left = lb.left + "px"; plate.style.top = lb.top + "px";
+      plate.style.width = lb.width + "px"; plate.style.height = lb.height + "px";
       return lb;
     }
     window.applyPlateMap = applyPlateMap;
 
-    /** Opaque-alpha content bbox; feet = densest bottom row (ignore sparse fringe). */
-    function contentBBox(img) {
-      const w = img.naturalWidth || img.width;
-      const h = img.naturalHeight || img.height;
-      const c = document.createElement("canvas");
-      c.width = w; c.height = h;
-      const ctx = c.getContext("2d", { willReadFrequently: true });
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0);
-      let data;
-      try { data = ctx.getImageData(0, 0, w, h).data; }
-      catch { return { x0: 0, y0: 0, x1: w - 1, y1: h - 1, cw: w, ch: h }; }
-      const rowCounts = new Array(h).fill(0);
-      let x0 = w, y0 = h, x1 = -1, y1 = -1;
-      for (let y = 0; y < h; y++) {
-        let cnt = 0;
-        for (let x = 0; x < w; x++) {
-          if (data[(y * w + x) * 4 + 3] > 8) {
-            cnt++;
-            if (x < x0) x0 = x;
-            if (x > x1) x1 = x;
-            if (y < y0) y0 = y;
-          }
-        }
-        rowCounts[y] = cnt;
-      }
-      if (x1 < 0) return { x0: 0, y0: 0, x1: w - 1, y1: h - 1, cw: w, ch: h };
-      // Find max row count in lower half; walk up from bottom until row has >= 25% of that
-      let maxLower = 0;
-      for (let y = Math.floor(h * 0.45); y < h; y++) if (rowCounts[y] > maxLower) maxLower = rowCounts[y];
-      const thr = Math.max(4, Math.floor(maxLower * 0.25));
-      y1 = h - 1;
-      while (y1 > y0 && rowCounts[y1] < thr) y1--;
-      // trim sparse top fringe similarly
-      let maxUpper = 0;
-      for (let y = y0; y <= Math.min(y1, y0 + Math.floor((y1 - y0) * 0.2)); y++) if (rowCounts[y] > maxUpper) maxUpper = rowCounts[y];
-      const thrTop = Math.max(3, Math.floor(maxUpper * 0.2));
-      while (y0 < y1 && rowCounts[y0] < thrTop) y0++;
-      return { x0, y0, x1, y1, cw: x1 - x0 + 1, ch: y1 - y0 + 1 };
-    }
-
-    /** Draw sprite so content bottom sits on sitY and content height ≈ targetH. */
-    function drawSeated(ctx, img, cx, sitY, targetH) {
-      const bb = contentBBox(img);
-      const scale = targetH / bb.ch;
-      const dw = bb.cw * scale;
-      const dh = bb.ch * scale;
-      const dx = cx - dw / 2;
-      const dy = sitY - dh; // content bottom == sitY
-      ctx.drawImage(
-        img,
-        bb.x0, bb.y0, bb.cw, bb.ch,
-        Math.round(dx), Math.round(dy), Math.round(dw), Math.round(dh)
-      );
-      return { dx: Math.round(dx), dy: Math.round(dy), dw: Math.round(dw), dh: Math.round(dh), bb, scale };
-    }
-
-    /** Last composed seat in native plate coords — used by liftoff plume. */
-    let lastSeat = { cx: 640, sitY: 548, deckY: 548, nozzleY: 548, smokeY: 548, width: 120, nozzles: [0], nw: NATIVE_W, nh: NATIVE_H };
-
-    function computeNozzles(width, boostId) {
-      // Offsets from stack CX in native px
-      if (boostId === "gridfin-booster") {
-        const side = Math.round(width * 0.38);
-        return [-side, 0, side];
-      }
-      if (boostId === "steel-booster") {
-        const s = Math.round(width * 0.22);
-        return [-s, 0, s];
-      }
-      return [0];
-    }
-
-    function noteSeat(drawInfo, cx, sitY, boostId) {
-      const w = Math.max(40, drawInfo.dw || 120);
-      const tod = TODS[state.todIndex].id;
-      const cfg = padCfg(tod);
-      lastSeat = {
-        cx: cx,
-        sitY: sitY,
-        deckY: cfg.deckY,
-        nozzleY: sitY + (cfg.nozzleOffsetY || 0),
-        smokeY: cfg.smokeOriginY != null ? cfg.smokeOriginY : cfg.deckY,
-        width: w,
-        nozzles: computeNozzles(w, boostId),
-        nw: NATIVE_W,
-        nh: NATIVE_H,
-        targetH: cfg.targetH,
-      };
-      return drawInfo;
-    }
-
-    let composeToken = 0;
-
     function clearStackOverlay() {
-      composeToken++;
       stackEl.classList.remove("on", "liftoff");
       stackEl.style.display = "none";
       stackEl.style.transform = "";
-      stackEl.style.opacity = "";
-      // wipe bitmap synchronously so late draws can't leave a ghost
-      try {
-        const w = stackEl.width;
-        stackEl.width = w; // reset clears
-        const ctx = stackEl.getContext("2d");
-        if (ctx) ctx.clearRect(0, 0, stackEl.width, stackEl.height);
-      } catch (_) {}
-      stackEl.width = 1;
-      stackEl.height = 1;
+      stackEl.width = 1; stackEl.height = 1;
     }
 
-    async function buildStackCanvas(nativeW, nativeH, token) {
-      const off = document.createElement("canvas");
-      off.width = nativeW;
-      off.height = nativeH;
-      const ctx = off.getContext("2d");
-      ctx.clearRect(0, 0, nativeW, nativeH);
-      // never use globalAlpha
-      ctx.globalAlpha = 1;
-
-      const tod = TODS[state.todIndex].id;
-      const cfg = padCfg(tod);
-      const cx = cfg.cx;
-      const sitY = cfg.sitY;
-      const targetH = cfg.targetH;
-      const sel = state.selected;
-      const boost = sel.boosters;
-
-      async function getPart(id) {
-        try {
-          return await loadImage(opaqueSrc(id));
-        } catch {
-          return await loadImage(`kit/opaque/${id}.png?v=${KIT_VER}`);
-        }
-      }
-
-      if (token !== composeToken) return null;
-
-      // --- Steel mode: only when steel-booster selected AND s1 is null ---
-      // (mutual exclusion enforced on pick; this is a safety net)
-      if (boost?.id === "steel-booster" && !sel.s1) {
-        let pre = null;
-        try { pre = await getPart("steel-booster-ship"); } catch (_) {}
-        if (token !== composeToken) return null;
-        if (pre) {
-          noteSeat(drawSeated(ctx, pre, cx, sitY, targetH), cx, sitY, "steel-booster");
-          return off;
-        }
-        const booster = await getPart("steel-booster");
-        if (token !== composeToken) return null;
-        let ship;
-        try { ship = await getPart("steel-ship"); }
-        catch { ship = await loadImage(`kit/opaque/steel-ship.png?v=${KIT_VER}`); }
-        if (token !== composeToken) return null;
-
-        // Compose booster+ship into temp then seat by content bbox
-        const tmp = document.createElement("canvas");
-        const bhFrac = 0.62, shFrac = 0.46;
-        const bh = Math.round(targetH * bhFrac);
-        const sh = Math.round(targetH * shFrac);
-        const bbb = contentBBox(booster);
-        const sbb = contentBBox(ship);
-        const bw = Math.round(bbb.cw * (bh / bbb.ch));
-        const sw = Math.round(sbb.cw * (sh / sbb.ch));
-        const cw = Math.max(bw, sw) + 4;
-        tmp.width = cw;
-        tmp.height = targetH;
-        const sctx = tmp.getContext("2d");
-        sctx.globalAlpha = 1;
-        sctx.drawImage(booster, bbb.x0, bbb.y0, bbb.cw, bbb.ch, (cw - bw) / 2, targetH - bh, bw, bh);
-        sctx.drawImage(ship, sbb.x0, sbb.y0, sbb.cw, sbb.ch, (cw - sw) / 2, 0, sw, sh);
-        noteSeat(drawSeated(ctx, tmp, cx, sitY, targetH), cx, sitY, "steel-booster");
-        return off;
-      }
-
-      // --- Core body from s1 (Moon Giant / Pencil Core) — never overridden by steel ---
-      let coreId = sel.s1?.id || null;
-      if (!coreId && boost?.id === "gridfin-booster") coreId = "gridfin-booster";
-      if (!coreId && sel.s2) coreId = sel.s2.id;
-      if (!coreId && sel.payload) coreId = sel.payload.id;
-      if (!coreId) return off;
-
-      const core = await getPart(coreId);
-      if (token !== composeToken) return null;
-
-      // Gridfin sides around current s1 (or gridfin body if no s1 / core is gridfin)
-      if (boost?.id === "gridfin-booster") {
-        let side = null;
-        try { side = await getPart("side-boost"); } catch (_) { side = null; }
-        if (token !== composeToken) return null;
-
-        if (side && sel.s1) {
-          const cbb = contentBBox(core);
-          const sbb = contentBBox(side);
-          const coreScale = targetH / cbb.ch;
-          const coreW = Math.round(cbb.cw * coreScale);
-          const coreH = targetH;
-          const sh = Math.round(targetH * 0.92);
-          const sw = Math.round(sbb.cw * (sh / sbb.ch));
-          const gap = Math.max(2, Math.round(sw / 8));
-          const canvasW = coreW + 2 * (sw + gap);
-          const g = document.createElement("canvas");
-          g.width = canvasW;
-          g.height = targetH;
-          const gctx = g.getContext("2d");
-          gctx.globalAlpha = 1;
-          gctx.drawImage(side, sbb.x0, sbb.y0, sbb.cw, sbb.ch, 0, targetH - sh, sw, sh);
-          gctx.drawImage(core, cbb.x0, cbb.y0, cbb.cw, cbb.ch, (canvasW - coreW) / 2, 0, coreW, coreH);
-          gctx.save();
-          gctx.translate(canvasW, 0);
-          gctx.scale(-1, 1);
-          gctx.drawImage(side, sbb.x0, sbb.y0, sbb.cw, sbb.ch, 0, targetH - sh, sw, sh);
-          gctx.restore();
-          noteSeat(drawSeated(ctx, g, cx, sitY, targetH), cx, sitY, "gridfin-booster");
-          return off;
-        }
-
-        // No side sprite or no s1: draw gridfin / core seated
-        const gf = coreId === "gridfin-booster" ? core : await getPart("gridfin-booster");
-        if (token !== composeToken) return null;
-        noteSeat(drawSeated(ctx, gf, cx, sitY, targetH), cx, sitY, boost?.id || "gridfin-booster");
-        return off;
-      }
-
-      // Plain core (Moon Giant / Pencil Core / etc.)
-      noteSeat(drawSeated(ctx, core, cx, sitY, targetH), cx, sitY, boost?.id || null);
-      return off;
-    }
-
-    async function paintStack() {
-      const token = ++composeToken;
-      const show = usesEmptyPad() && hasAnyParts();
-
-      if (!show) {
-        clearStackOverlay();
-        // clearStackOverlay bumps token again — that's fine
-        return;
-      }
-
-      // Clear previous frame immediately to avoid ghost while loading
-      try {
-        const ctx0 = stackEl.getContext("2d");
-        if (ctx0) ctx0.clearRect(0, 0, stackEl.width, stackEl.height);
-      } catch (_) {}
-
+    function paintStack() {
+      const show = usesEmptyPad() && !!rocket;
+      if (!show) { clearStackOverlay(); return; }
       const lb = applyPlateMap();
-      if (!lb || !plate.naturalWidth) {
-        return;
-      }
-
-      try {
-        const composed = await buildStackCanvas(lb.nw, lb.nh, token);
-        if (token !== composeToken) return; // stale
-        if (!composed) return;
-
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        // Extra headroom above plate so climb translate doesn't clip the tip
-        const head = Math.ceil(window.innerHeight || 390);
-        const totalH = lb.height + head;
-        stackEl.width = Math.round(lb.width * dpr);
-        stackEl.height = Math.round(totalH * dpr);
-        stackEl.style.left = Math.round(lb.left) + "px";
-        stackEl.style.top = Math.round(lb.top - head) + "px";
-        stackEl.style.width = Math.round(lb.width) + "px";
-        stackEl.style.height = Math.round(totalH) + "px";
-        if (state.phase !== "liftoff") {
-          stackEl.style.transform = "";
-          stackEl.style.opacity = "1";
+      if (!lb || !plate.naturalWidth) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const head = Math.ceil(window.innerHeight || 390);
+      const totalH = lb.height + head;
+      const W = Math.round(lb.width * dpr), H = Math.round(totalH * dpr);
+      if (stackEl.width !== W || stackEl.height !== H) { stackEl.width = W; stackEl.height = H; }
+      stackEl.style.left = lb.left + "px";
+      stackEl.style.top = (lb.top - head) + "px";
+      stackEl.style.width = lb.width + "px";
+      stackEl.style.height = totalH + "px";
+      if (state.phase !== "liftoff") { stackEl.style.transform = ""; stackEl.style.opacity = "1"; }
+      stackEl.style.display = "block";
+      stackEl.classList.add("on");
+      const ctx = stackEl.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, lb.width, totalH);
+      const s = lb.width / lb.nw;
+      const X = rocket.left * s, Y = head + rocket.top * s;
+      if (state.phase !== "liftoff" && rocket.shadowCv)
+        ctx.drawImage(rocket.shadowCv, rocket.shadowRect.x * s, head + rocket.shadowRect.y * s, rocket.shadowCv.width * s, rocket.shadowCv.height * s);
+      ctx.drawImage(rocket.staticCv, X, Y, rocket.w * s, rocket.h * s);
+      if (rocket.movingCv) {
+        let off = 0;
+        if (rocket.anim) {
+          const p = Math.min(1, (performance.now() - rocket.anim.t0) / DROP_MS);
+          off = p < 0.72 ? -DROP_N * Math.pow(1 - p / 0.72, 2) : -4 * Math.sin(Math.PI * (p - 0.72) / 0.28);
+          if (p >= 1) { rocket.anim = null; off = 0; }
         }
-        stackEl.style.display = "block";
-        stackEl.classList.add("on");
-
-        const ctx = stackEl.getContext("2d");
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.globalAlpha = 1;
-        ctx.clearRect(0, 0, lb.width, totalH);
-        ctx.drawImage(composed, 0, head, lb.width, lb.height);
-      } catch (e) {
-        console.warn("compose failed", e);
+        ctx.drawImage(rocket.movingCv, X, Y + off * s, rocket.w * s, rocket.h * s);
       }
-    }
-
-    function renderTabs() {
-      [...tabs.children].forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
-    }
-
-    function selectPart(p) {
-      if (state.phase !== "assemble") return;
-      // toggle off
-      if (state.selected[p.role]?.id === p.id) {
-        state.selected[p.role] = null;
-        return;
-      }
-      state.selected[p.role] = p;
-      // Mutual exclusion: Steel Booster ↔ s1 (Moon Giant / Pencil Core)
-      if (p.role === "boosters" && p.id === "steel-booster") {
-        state.selected.s1 = null;
-      }
-      if (p.role === "s1") {
-        if (state.selected.boosters?.id === "steel-booster") {
-          state.selected.boosters = null;
+      if (state.swapSlot && state.phase === "assemble") {
+        const oc = outlineFor(state.swapSlot);
+        if (oc) {
+          ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 140);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(oc, X, Y, rocket.w * s, rocket.h * s);
+          ctx.imageSmoothingEnabled = true;
+          ctx.globalAlpha = 1;
         }
       }
     }
 
-    function renderCards() {
-      cards.innerHTML = "";
-      PARTS[state.tab].forEach((p) => {
-        const el = document.createElement("button");
-        el.type = "button";
-        el.className = "card" + (state.selected[p.role]?.id === p.id ? " selected" : "");
-        el.innerHTML = `<img alt="" src="${kitSrc(p.id)}" /><div class="name">${p.name}</div>`;
-        el.addEventListener("click", () => {
-          selectPart(p);
-          render();
-        });
-        cards.appendChild(el);
-      });
+    // Tap a placed piece to swap it
+    $("stage").addEventListener("click", (e) => {
+      if (state.phase !== "assemble" || !rocket) return;
+      const lb = plateMap(); if (!lb) return;
+      const r = stackEl.getBoundingClientRect();
+      if (!r.width) return;
+      const head = Math.ceil(window.innerHeight || 390);
+      const fx = (e.clientX - r.left) / r.width * lb.width;
+      const fy = (e.clientY - r.top) / r.height * (lb.height + head) - head;
+      const nx = Math.round(fx / (lb.width / lb.nw)) - rocket.left, ny = Math.round(fy / (lb.width / lb.nw)) - rocket.top;
+      let best = null, bd = 1e9;
+      for (let dy = -8; dy <= 8; dy++) for (let dx = -8; dx <= 8; dx++) {
+        const x = nx + dx, y = ny + dy;
+        if (x < 0 || y < 0 || x >= rocket.w || y >= rocket.h) continue;
+        const o = rocket.owner[y * rocket.w + x];
+        if (o && dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = rocket.slotIdx[o - 1]; }
+      }
+      if (!best) return;
+      state.swapSlot = best; state.step = best;
+      renderBuilder();
+      requestAnimationFrame(animTick);
+    });
+
+    /* ---------------- assemble framing (portrait: keep the whole rocket above the tray) ---------------- */
+    function applyAssembleFrame() {
+      const lb = plateMap();
+      if (!lb) return;
+      const p = state.phase;
+      if (p !== "assemble" && p !== "grounded") return;
+      const portrait = lb.ch > lb.cw;
+      let tf = "";
+      if (p === "assemble" && portrait) {
+        const cfg = padCfg(TODS[state.todIndex].id);
+        const chromeTop = chromeEl.getBoundingClientRect().top;
+        const feet = lb.top + cfg.sitY * lb.scale;
+        if (feet > chromeTop - 10) {
+          const s = Math.max(0.72, (chromeTop - 10) / feet);
+          const ox = lb.left + cfg.cx * lb.scale;
+          tf = `translate3d(${(ox * (1 - s)).toFixed(1)}px,0,0) scale(${s.toFixed(4)})`;
+        }
+      }
+      worldEl.classList.add("assembleZoom");
+      worldEl.style.transformOrigin = "0 0";
+      worldEl.style.transform = tf;
+      if (tf) plateWrap.classList.add("assembleOpen");
     }
 
     function setChrome() {
       const p = state.phase;
-      assembleUI.style.display = p === "assemble" ? "block" : "none";
-      // Hide bottom chrome during liftoff so pad/plume aren't covered
+      assembleUI.style.display = p === "assemble" ? "flex" : "none";
+      assembleUI.style.flexDirection = "column"; assembleUI.style.gap = "6px";
+      chromeEl.classList.toggle("building", p === "assemble");
       opsEl.classList.toggle("on", p === "grounded");
-      document.getElementById("chrome").classList.toggle("liftoffHidden", p === "liftoff");
+      chromeEl.classList.toggle("liftoffHidden", p === "liftoff");
       const fb = !!state.flightBackdrop && (p === "mission" || p === "outcome");
-      document.getElementById("todRow").style.display = (p === "liftoff" || fb) ? "none" : "";
-      document.getElementById("meta").style.display = (p === "liftoff") ? "none" : "";
-      // top pills hide from pad-ops/countdown on (tallest 03 tip reaches y~13 in landscape)
-      document.getElementById("hud").style.display = (p === "liftoff" || p === "grounded") ? "none" : "";
+      todRow.style.display = (p === "liftoff" || p === "grounded" || fb) ? "none" : "";
+      meta.style.display = (p === "liftoff" || p === "assemble") ? "none" : "";
+      $("hud").style.display = (p === "liftoff" || p === "grounded" || p === "assemble") ? "none" : "";
       missionBox.classList.toggle("on", p === "mission");
       outcomeBox.classList.toggle("on", p === "outcome");
       phaseHud.textContent = p.toUpperCase();
-      stackHud.textContent = stackSummary();
-      launchBtn.disabled = !canLaunch();
+      stackHud.textContent = KIT ? (idsOf(state.build).map(lbl).join(" + ") || "\u2014") : "";
+      launchBtn.disabled = !(KIT && isComplete(state.build) && !validate(state.build, 0));
       plateWrap.classList.toggle("liftoffClimb", p === "liftoff" || fb);
     }
 
@@ -766,54 +724,52 @@
     function render() {
       const tod = TODS[state.todIndex];
       const src = plateSrc();
-      const prev = plate.getAttribute("src");
-      if (prev !== src) {
-        plate.onload = () => paintStack();
+      if (plate.getAttribute("src") !== src) {
+        plate.onload = () => { applyAssembleFrame(); paintStack(); };
         plate.src = src;
-      } else {
-        paintStack();
-      }
-      meta.textContent = `${tod.id} ${tod.label} · ${state.phase.toUpperCase()} · live compose`;
+      } else paintStack();
+      meta.textContent = `${tod.id} ${tod.label} \u00b7 ${state.phase.toUpperCase()} \u00b7 modular build`;
       [...todRow.children].forEach((b, i) => b.classList.toggle("active", i === state.todIndex));
-      renderTabs();
-      renderCards();
+      renderBuilder();
       setChrome();
-      history.replaceState(null, "", `#${tod.id}-${state.phase}`);
+      applyAssembleFrame();
+      history.replaceState(null, "", `${location.search}#${tod.id}-${state.phase}`);
     }
 
-    document.getElementById("clearBtn").onclick = () => {
-      state.selected = { s1: null, s2: null, payload: null, boosters: null };
-      clearStackOverlay();
-      setChrome();
+    $("clearBtn").onclick = () => {
+      if (state.phase !== "assemble") return;
+      if (state.build.s1) state.history.push(state.build);
+      state.build = EMPTY_BUILD(); state.step = "s1"; state.swapSlot = null;
+      rebuildRocket(null); render();
+    };
+    $("undoBtn").onclick = () => {
+      if (state.phase !== "assemble" || !state.history.length) return;
+      const cur = state.build;
+      state.build = state.history.pop(); state.swapSlot = null;
+      const b = state.build;
+      state.step = !b.s1 ? "s1" : !b.upper ? "upper" : isComplete(b) ? state.step : "payload";
+      rebuildRocket(null);
       render();
+      setReason("Undo \u00b7 " + summaryLine(), "");
+      void cur;
     };
 
     async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-    const soundBtn = document.getElementById("soundBtn");
+    const soundBtn = $("soundBtn");
     let liftoffEngine = null;
-    let lastPerf = null;
-
     function getLiftoff() {
       if (liftoffEngine) return liftoffEngine;
       const API = window.RocketBayLiftoff;
       if (!API) { console.warn("liftoff.js missing"); return null; }
-      const captureMode = new URLSearchParams(location.search).has("capture");
       liftoffEngine = new API.LiftoffEngine({
-        captureMode: captureMode,
+        captureMode: QS.has("capture"),
         getLetterbox: () => plateMap(),
-        getParallaxEl: () => document.getElementById("parallax"),
+        getParallaxEl: () => $("parallax"),
         getSeat: () => {
-          const tod = TODS[state.todIndex].id;
-          const cfg = padCfg(tod);
-          return Object.assign({}, lastSeat, {
-            cx: cfg.cx,
-            sitY: cfg.sitY,
-            deckY: cfg.deckY,
-            nozzleY: cfg.sitY + (cfg.nozzleOffsetY || 0),
-            smokeY: cfg.smokeOriginY != null ? cfg.smokeOriginY : cfg.deckY,
-            targetH: cfg.targetH,
-          });
+          const cfg = padCfg(TODS[state.todIndex].id);
+          return Object.assign({}, lastSeat, { cx: cfg.cx, sitY: cfg.sitY, deckY: cfg.deckY, nozzleY: cfg.sitY + (cfg.nozzleOffsetY || 0),
+            smokeY: cfg.smokeOriginY != null ? cfg.smokeOriginY : cfg.deckY });
         },
         getTodId: () => TODS[state.todIndex].id,
         getWorldEl: () => worldEl,
@@ -823,18 +779,16 @@
         getStackEl: () => stackEl,
         getPlateEl: () => plate,
         onComplete: () => {
-          // v3: end ON the flight — keep the high-altitude sky / departing plume as the
-          // mission backdrop (no hard cut back to the pad plate). Restart resets the engine.
           state.phase = "mission";
           state.flightBackdrop = true;
           clearStackOverlay();
           render();
         },
-        onPerfSample: (samples) => { lastPerf = samples; window.__liftoffPerf = samples; },
+        onPerfSample: (samples) => { window.__liftoffPerf = samples; },
       });
       window.__liftoffCapture = {
         start: () => { const e = getLiftoff(); if (e) e.startCapture(); },
-        step: (dt) => { const e = getLiftoff(); if (e) e.captureStep(dt || 1/60); },
+        step: (dt) => { const e = getLiftoff(); if (e) e.captureStep(dt || 1 / 60); },
         running: () => !!(liftoffEngine && liftoffEngine.running),
         state: () => window.__liftoffState,
       };
@@ -843,8 +797,7 @@
 
     soundBtn.onclick = () => {
       const eng = getLiftoff();
-      const currentlyMuted = soundBtn.textContent.indexOf("OFF") >= 0;
-      const muted = !currentlyMuted; // toggle
+      const muted = !(soundBtn.textContent.indexOf("OFF") >= 0);
       soundBtn.textContent = muted ? "SOUND OFF" : "SOUND ON";
       soundBtn.classList.toggle("on", !muted);
       if (eng) {
@@ -855,32 +808,23 @@
     };
 
     launchBtn.onclick = async () => {
-      if (!canLaunch() || state.phase !== "assemble") return;
-      // Light pad-ops, then heavy countdown+liftoff
+      if (launchBtn.disabled || state.phase !== "assemble") return;
+      state.swapSlot = null;
+      if (rocket) rocket.anim = null;
       state.phase = "grounded";
-      assembleUI.style.display = "none";
       render();
-      renderOps(0);
-      await sleep(280);
-      renderOps(1);
-      await sleep(280);
-      renderOps(2);
-      await sleep(280);
-      renderOps(3);
-      await sleep(200);
-
+      renderOps(0); await sleep(280);
+      renderOps(1); await sleep(280);
+      renderOps(2); await sleep(280);
+      renderOps(3); await sleep(200);
+      worldEl.classList.remove("assembleZoom");
+      worldEl.style.transform = "";
+      plateWrap.classList.remove("assembleOpen");
       state.phase = "liftoff";
       setChrome();
-      meta.textContent = `${TODS[state.todIndex].id} ${TODS[state.todIndex].label} · LIFTOFF · live compose`;
-      // Ensure stack painted before engine starts
-      await paintStack();
+      paintStack();
       const eng = getLiftoff();
-      if (!eng) {
-        state.phase = "mission";
-        render();
-        return;
-      }
-      // Sync mute from button
+      if (!eng) { state.phase = "mission"; render(); return; }
       eng.audioMuted = soundBtn.textContent.indexOf("OFF") >= 0;
       eng.start();
     };
@@ -888,42 +832,46 @@
     function finishMission(choice) {
       state.missionChoice = choice;
       state.phase = "outcome";
+      const b = state.build;
       const base = 62 + Math.floor(Math.random() * 18);
-      const boost = state.selected.boosters ? 8 : 0;
-      const score = Math.min(99, base + boost + (choice === "explore" ? 5 : 3));
-      document.getElementById("outcomeScore").textContent = `ROCKET SCORE ${score}`;
-      document.getElementById("outcomeText").textContent =
-        choice === "deploy"
-          ? `${state.selected.payload?.name || "Payload"} deployed from ${state.selected.s1?.name || "stack"}. Clean separation.`
-          : `${state.selected.s1?.name || "Stack"} / ${state.selected.s2?.name || ""} coasting — explore path locked in.`;
+      const score = Math.min(99, base + (b.sides ? 8 : 0) + (choice === "explore" ? 5 : 3));
+      $("outcomeScore").textContent = `ROCKET SCORE ${score}`;
+      $("outcomeText").textContent = choice === "deploy"
+        ? `${b.payload ? lbl(b.payload) : lbl(b.upper)} deployed from ${lbl(b.s1)}. Clean separation.`
+        : `${lbl(b.s1)} / ${lbl(b.upper)} coasting \u2014 explore path locked in.`;
       render();
     }
-
-    document.getElementById("deployBtn").onclick = () => finishMission("deploy");
-    document.getElementById("exploreBtn").onclick = () => finishMission("explore");
-    document.getElementById("restartBtn").onclick = () => {
+    $("deployBtn").onclick = () => finishMission("deploy");
+    $("exploreBtn").onclick = () => finishMission("explore");
+    $("restartBtn").onclick = () => {
       if (liftoffEngine) liftoffEngine.reset();
       state.flightBackdrop = false;
       state.phase = "assemble";
       state.missionChoice = null;
-      state.selected = {
-        s1: PARTS.s1[0],
-        s2: PARTS.s2[0],
-        payload: PARTS.payload[0],
-        boosters: null,
-      };
-      state.todIndex = todFromHour(new Date().getHours());
-    plate.addEventListener("load", () => { applyPlateMap(); });
-      clearStackOverlay();
       worldEl.style.transform = "";
       skyExt.style.opacity = "0";
       countdownHud.style.display = "none";
       fxCanvas.style.display = "none";
+      rebuildRocket(null);
       render();
     };
 
-    window.addEventListener("resize", () => { applyPlateMap(); if (state.phase !== "liftoff") paintStack(); });
+    window.addEventListener("resize", () => { applyPlateMap(); if (state.phase !== "liftoff") { applyAssembleFrame(); paintStack(); } });
     render();
+    MB.loadKit("kit/modular/", KIT_VER).then((k) => {
+      KIT = k;
+      window.__kit = k;
+      // dev/capture convenience: ?build=s1,upper[,payload]&sides=1
+      if (QS.get("build")) {
+        const ids = QS.get("build").split(",");
+        const b = EMPTY_BUILD();
+        ids.forEach((id) => { const t = k.metas[id] && k.metas[id].type; if (t === "first_stage") b.s1 = id; else if (t === "upper") b.upper = id; else if (t === "payload") b.payload = id; });
+        b.sides = QS.get("sides") === "1";
+        state.build = b; state.step = isComplete(b) ? "sides" : (b.upper ? "payload" : b.s1 ? "upper" : "s1");
+      }
+      rebuildRocket(null);
+      render();
+    }).catch((e) => { console.error(e); setReason("Kit failed to load", "warn"); });
   </script>
 </body>
 </html>

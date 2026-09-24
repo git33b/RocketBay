@@ -4,10 +4,16 @@ Phone-friendly assemble → pad-ops → **heavy liftoff** → mission loop with 
 
 - Live: https://finance-tracker-159e2.web.app/rocketbay/
 - Empty pads: per-TOD path in `pad-config.js` (default `plates/empty/{02–05}-empty-pad-v2.png`)
-- Kit: architect-sealed / span-solid opaque under `kit/opaque/`
+- Kit: **modular kit v1.5.3** (CoE-gated, copied read-only) under `kit/modular/` — `kit.json` (piece metas,
+  pairsDisallowed, precomputed v153 grounded Lab stats) + `pieces/{first_stage,upper,payload,side_booster}/*.png`
+- `modular.js`: JS port of `modular_join.py` (join_width, body_cx, edge_row_mid, make_frustum, join_rule,
+  check_pair, check_stack, compose_stack) + `compose_proofs_v153` light / seat / contact shadow.
+  Verified against the architect's mixed proofs: `dev/proof.html` (0 px silhouette XOR, joins/feet identical).
+- Builder (phone first): 1 FIRST STAGE → 2 UPPER (Steel Ship ends the stack) → 3 PAYLOAD, + optional side
+  boosters. Disallowed pieces are greyed with the kit's one-line reason; height budget = tip y ≥ 40 at the
+  plate's sit_y. Tap a placed piece to swap it; UNDO / CLEAR. `?build=a,b,c&sides=1&tod=05` preloads a stack.
 - Pad geometry: **`web/pad-config.js`** (see below) — compose seating + liftoff FX both read it
 - CLEAR: empty pad only (no stack ghost)
-- Steel mutually exclusive with Moon Giant / Pencil Core
 
 
 ## Pad config (`pad-config.js`)

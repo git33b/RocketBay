@@ -1,0 +1,697 @@
+{
+ "version": "v1.5.3",
+ "source": "modular-kit v1.5.3 (CoE-gated), copied read-only",
+ "pieces": [
+  {
+   "id": "moon-giant-s1",
+   "label": "Moon Giant",
+   "type": "first_stage",
+   "family": "moon-giant",
+   "file": "pieces/first_stage/moon-giant-s1.png",
+   "width": 90,
+   "height": 271,
+   "bodyCX": 49.5,
+   "joinTopWidth": 68,
+   "joinBottomWidth": 89,
+   "joinTopMidX": 49.5,
+   "joinBottomMidX": 44.5,
+   "sourceRows": [
+    215,
+    493
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "moon-giant-upper",
+   "label": "Moon Giant Upper",
+   "type": "upper",
+   "family": "moon-giant",
+   "file": "pieces/upper/moon-giant-upper.png",
+   "width": 70,
+   "height": 150,
+   "bodyCX": 34.0,
+   "joinTopWidth": 39,
+   "joinBottomWidth": 67,
+   "joinTopMidX": 34.0,
+   "joinBottomMidX": 34.0,
+   "sourceRows": [
+    65,
+    215
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "moon-giant-fairing",
+   "label": "Moon Giant Fairing",
+   "type": "payload",
+   "family": "moon-giant",
+   "file": "pieces/payload/moon-giant-fairing.png",
+   "width": 35,
+   "height": 65,
+   "bodyCX": 17.0,
+   "joinTopWidth": 5,
+   "joinBottomWidth": 35,
+   "joinTopMidX": 17.0,
+   "joinBottomMidX": 17.0,
+   "sourceRows": [
+    0,
+    65
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "pencil-core-s1",
+   "label": "Pencil Core",
+   "type": "first_stage",
+   "family": "pencil-core",
+   "file": "pieces/first_stage/pencil-core-s1.png",
+   "width": 115,
+   "height": 283,
+   "bodyCX": 61.0,
+   "joinTopWidth": 53,
+   "joinBottomWidth": 110,
+   "joinTopMidX": 61.0,
+   "joinBottomMidX": 59.5,
+   "sourceRows": [
+    192,
+    482
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": true
+  },
+  {
+   "id": "pencil-upper",
+   "label": "Pencil Upper",
+   "type": "upper",
+   "family": "pencil-core",
+   "file": "pieces/upper/pencil-upper.png",
+   "width": 42,
+   "height": 122,
+   "bodyCX": 20.5,
+   "joinTopWidth": 34,
+   "joinBottomWidth": 39,
+   "joinTopMidX": 18.5,
+   "joinBottomMidX": 21.0,
+   "sourceRows": [
+    48,
+    170
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "pencil-fairing",
+   "label": "Pencil Fairing",
+   "type": "payload",
+   "family": "pencil-core",
+   "file": "pieces/payload/pencil-fairing.png",
+   "width": 26,
+   "height": 44,
+   "bodyCX": 12.0,
+   "joinTopWidth": 5,
+   "joinBottomWidth": 26,
+   "joinTopMidX": 12.0,
+   "joinBottomMidX": 12.5,
+   "sourceRows": [
+    0,
+    48
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "gridfin-booster-s1",
+   "label": "Gridfin Booster",
+   "type": "first_stage",
+   "family": "gridfin-booster",
+   "file": "pieces/first_stage/gridfin-booster-s1.png",
+   "width": 58,
+   "height": 277,
+   "bodyCX": 31.0,
+   "joinTopWidth": 33,
+   "joinBottomWidth": 58,
+   "joinTopMidX": 30.5,
+   "joinBottomMidX": 28.5,
+   "sourceRows": [
+    177,
+    467
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "gridfin-upper",
+   "label": "Gridfin Upper",
+   "type": "upper",
+   "family": "gridfin-booster",
+   "file": "pieces/upper/gridfin-upper.png",
+   "width": 32,
+   "height": 83,
+   "bodyCX": 15.0,
+   "joinTopWidth": 30,
+   "joinBottomWidth": 25,
+   "joinTopMidX": 14.5,
+   "joinBottomMidX": 18.5,
+   "sourceRows": [
+    80,
+    170
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "gridfin-fairing",
+   "label": "Gridfin Fairing",
+   "type": "payload",
+   "family": "gridfin-booster",
+   "file": "pieces/payload/gridfin-fairing.png",
+   "width": 39,
+   "height": 80,
+   "bodyCX": 18.5,
+   "joinTopWidth": 8,
+   "joinBottomWidth": 38,
+   "joinTopMidX": 19.5,
+   "joinBottomMidX": 19.0,
+   "sourceRows": [
+    0,
+    80
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "steel-booster",
+   "label": "Steel Booster",
+   "type": "first_stage",
+   "family": "steel",
+   "file": "pieces/first_stage/steel-booster.png",
+   "width": 90,
+   "height": 255,
+   "bodyCX": 55.5,
+   "joinTopWidth": 60,
+   "joinBottomWidth": 84,
+   "joinTopMidX": 55.5,
+   "joinBottomMidX": 47.5,
+   "sourceRows": [
+    200,
+    463
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "steel-ship",
+   "label": "Steel Ship",
+   "type": "upper",
+   "family": "steel",
+   "file": "pieces/upper/steel-ship.png",
+   "width": 77,
+   "height": 200,
+   "bodyCX": 42.5,
+   "joinTopWidth": 9,
+   "joinBottomWidth": 60,
+   "joinTopMidX": 43.0,
+   "joinBottomMidX": 42.5,
+   "sourceRows": [
+    0,
+    200
+   ],
+   "selfTopped": true,
+   "fairingIncompatible": true,
+   "strapOns": false
+  },
+  {
+   "id": "orange-tank-core",
+   "label": "Orange Tank",
+   "type": "first_stage",
+   "family": "orange-tank",
+   "file": "pieces/first_stage/orange-tank-core.png",
+   "width": 100,
+   "height": 341,
+   "bodyCX": 55.5,
+   "joinTopWidth": 46,
+   "joinBottomWidth": 91,
+   "joinTopMidX": 55.5,
+   "joinBottomMidX": 53.0,
+   "sourceRows": [
+    132,
+    481
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": true
+  },
+  {
+   "id": "orange-upper",
+   "label": "Orange Upper",
+   "type": "upper",
+   "family": "orange-tank",
+   "file": "pieces/upper/orange-upper.png",
+   "width": 44,
+   "height": 62,
+   "bodyCX": 22.0,
+   "joinTopWidth": 36,
+   "joinBottomWidth": 43,
+   "joinTopMidX": 21.5,
+   "joinBottomMidX": 21.5,
+   "sourceRows": [
+    70,
+    132
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "orange-fairing",
+   "label": "Orange Fairing",
+   "type": "payload",
+   "family": "orange-tank",
+   "file": "pieces/payload/orange-fairing.png",
+   "width": 36,
+   "height": 70,
+   "bodyCX": 17.75,
+   "joinTopWidth": 4,
+   "joinBottomWidth": 36,
+   "joinTopMidX": 17.5,
+   "joinBottomMidX": 17.5,
+   "sourceRows": [
+    0,
+    70
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false,
+   "aliasOf": "escape-cone"
+  },
+  {
+   "id": "escape-cone",
+   "label": "Escape Cone",
+   "type": "payload",
+   "family": "orange-tank",
+   "file": "pieces/payload/escape-cone.png",
+   "width": 36,
+   "height": 70,
+   "bodyCX": 17.75,
+   "joinTopWidth": 4,
+   "joinBottomWidth": 36,
+   "joinTopMidX": 17.5,
+   "joinBottomMidX": 17.5,
+   "sourceRows": [
+    0,
+    70
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "euro-core-s1",
+   "label": "Euro Core",
+   "type": "first_stage",
+   "family": "euro-core",
+   "file": "pieces/first_stage/euro-core-s1.png",
+   "width": 86,
+   "height": 256,
+   "bodyCX": 46.5,
+   "joinTopWidth": 43,
+   "joinBottomWidth": 81,
+   "joinTopMidX": 46.0,
+   "joinBottomMidX": 43.5,
+   "sourceRows": [
+    215,
+    481
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": true
+  },
+  {
+   "id": "euro-upper",
+   "label": "Euro Upper",
+   "type": "upper",
+   "family": "euro-core",
+   "file": "pieces/upper/euro-upper.png",
+   "width": 43,
+   "height": 145,
+   "bodyCX": 21.0,
+   "joinTopWidth": 43,
+   "joinBottomWidth": 43,
+   "joinTopMidX": 21.0,
+   "joinBottomMidX": 21.0,
+   "sourceRows": [
+    70,
+    215
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "euro-fairing",
+   "label": "Euro Fairing",
+   "type": "payload",
+   "family": "euro-core",
+   "file": "pieces/payload/euro-fairing.png",
+   "width": 43,
+   "height": 62,
+   "bodyCX": 21.0,
+   "joinTopWidth": 5,
+   "joinBottomWidth": 43,
+   "joinTopMidX": 21.0,
+   "joinBottomMidX": 21.0,
+   "sourceRows": [
+    0,
+    70
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  },
+  {
+   "id": "side-booster-left",
+   "label": "Side Booster Left",
+   "type": "side_booster",
+   "family": "orange-tank",
+   "file": "pieces/side_booster/side-booster-left.png",
+   "width": 35,
+   "height": 104,
+   "bodyCX": 16.5,
+   "joinTopWidth": 5,
+   "joinBottomWidth": 28,
+   "joinTopMidX": 17.0,
+   "joinBottomMidX": 17.0,
+   "sourceRows": [
+    132,
+    481
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false,
+   "side": "left"
+  },
+  {
+   "id": "side-booster-right",
+   "label": "Side Booster Right",
+   "type": "side_booster",
+   "family": "orange-tank",
+   "file": "pieces/side_booster/side-booster-right.png",
+   "width": 27,
+   "height": 107,
+   "bodyCX": 15.0,
+   "joinTopWidth": 1,
+   "joinBottomWidth": 25,
+   "joinTopMidX": 13.0,
+   "joinBottomMidX": 12.5,
+   "sourceRows": [
+    132,
+    481
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false,
+   "side": "right"
+  },
+  {
+   "id": "orange-tank-core-bare",
+   "label": "Orange Tank (bare core)",
+   "type": "first_stage",
+   "family": "orange-tank",
+   "file": "pieces/first_stage/orange-tank-core-bare.png",
+   "width": 58,
+   "height": 341,
+   "bodyCX": 28.5,
+   "joinTopWidth": 46,
+   "joinBottomWidth": 58,
+   "joinTopMidX": 28.5,
+   "joinBottomMidX": 28.5,
+   "sourceRows": [
+    132,
+    481
+   ],
+   "selfTopped": false,
+   "fairingIncompatible": false,
+   "strapOns": false
+  }
+ ],
+ "compatibility": {
+  "limits": {
+   "butt_tol_px": 3,
+   "frustum_h_px": 7,
+   "max_frustum_width_step_px": 30,
+   "max_overhang_upper_px": 8,
+   "max_overhang_payload_px": 10
+  },
+  "pairsDisallowed": [
+   {
+    "top": "moon-giant-upper",
+    "bottom": "pencil-core-s1",
+    "reason": "moon-giant-upper (67px) overhangs pencil-core-s1 (53px) by 14px > 8px"
+   },
+   {
+    "top": "moon-giant-upper",
+    "bottom": "gridfin-booster-s1",
+    "reason": "moon-giant-upper (67px) overhangs gridfin-booster-s1 (33px) by 34px > 8px"
+   },
+   {
+    "top": "moon-giant-upper",
+    "bottom": "orange-tank-core",
+    "reason": "moon-giant-upper (67px) overhangs orange-tank-core (46px) by 21px > 8px"
+   },
+   {
+    "top": "moon-giant-upper",
+    "bottom": "euro-core-s1",
+    "reason": "moon-giant-upper (67px) overhangs euro-core-s1 (43px) by 24px > 8px"
+   },
+   {
+    "top": "moon-giant-upper",
+    "bottom": "orange-tank-core-bare",
+    "reason": "moon-giant-upper (67px) overhangs orange-tank-core-bare (46px) by 21px > 8px"
+   },
+   {
+    "top": "gridfin-upper",
+    "bottom": "moon-giant-s1",
+    "reason": "width step 43px > 30px (frustum would read as a shelf)"
+   },
+   {
+    "top": "gridfin-upper",
+    "bottom": "steel-booster",
+    "reason": "width step 35px > 30px (frustum would read as a shelf)"
+   },
+   {
+    "top": "steel-ship",
+    "bottom": "gridfin-booster-s1",
+    "reason": "steel-ship (60px) overhangs gridfin-booster-s1 (33px) by 27px > 8px"
+   },
+   {
+    "top": "steel-ship",
+    "bottom": "orange-tank-core",
+    "reason": "steel-ship (60px) overhangs orange-tank-core (46px) by 14px > 8px"
+   },
+   {
+    "top": "steel-ship",
+    "bottom": "euro-core-s1",
+    "reason": "steel-ship (60px) overhangs euro-core-s1 (43px) by 17px > 8px"
+   },
+   {
+    "top": "steel-ship",
+    "bottom": "orange-tank-core-bare",
+    "reason": "steel-ship (60px) overhangs orange-tank-core-bare (46px) by 14px > 8px"
+   },
+   {
+    "top": "orange-upper",
+    "bottom": "gridfin-booster-s1",
+    "reason": "orange-upper (43px) overhangs gridfin-booster-s1 (33px) by 10px > 8px"
+   },
+   {
+    "top": "euro-upper",
+    "bottom": "gridfin-booster-s1",
+    "reason": "euro-upper (43px) overhangs gridfin-booster-s1 (33px) by 10px > 8px"
+   },
+   {
+    "top": "moon-giant-fairing",
+    "bottom": "steel-ship",
+    "reason": "steel-ship is selfTopped (nothing may sit on it)"
+   },
+   {
+    "top": "pencil-fairing",
+    "bottom": "steel-ship",
+    "reason": "steel-ship is selfTopped (nothing may sit on it)"
+   },
+   {
+    "top": "gridfin-fairing",
+    "bottom": "steel-ship",
+    "reason": "steel-ship is selfTopped (nothing may sit on it)"
+   },
+   {
+    "top": "orange-fairing",
+    "bottom": "steel-ship",
+    "reason": "steel-ship is selfTopped (nothing may sit on it)"
+   },
+   {
+    "top": "escape-cone",
+    "bottom": "steel-ship",
+    "reason": "steel-ship is selfTopped (nothing may sit on it)"
+   },
+   {
+    "top": "euro-fairing",
+    "bottom": "gridfin-upper",
+    "reason": "euro-fairing (43px) overhangs gridfin-upper (30px) by 13px > 10px"
+   },
+   {
+    "top": "euro-fairing",
+    "bottom": "steel-ship",
+    "reason": "steel-ship is selfTopped (nothing may sit on it)"
+   }
+  ],
+  "disallowedRules": [
+   "nothing on a selfTopped piece (Steel Ship)",
+   "no payload on a fairingIncompatible piece (Steel Ship)",
+   "no payload directly on a first stage; no stage on a payload; side boosters never in the stack",
+   "upper overhang > 8 px (e.g. Steel Ship 60 px on Euro Core 43 px / Gridfin Booster 33 px / Orange Tank 46 px; allowed: Moon Giant Upper 67 px on Steel Booster 60 px)",
+   "payload overhang > 10 px",
+   "frustum width step > 30 px (reads as a shelf)",
+   "side boosters on a core with native strap-ons (Orange Tank, Euro Core, Pencil Core) - use a bare core"
+  ]
+ },
+ "lighting": {
+  "profile": "v153",
+  "kitMean": [
+   76.98037719726562,
+   128.1778564453125,
+   130.4601287841797
+  ],
+  "kitStd": [
+   54.26303482055664,
+   1.0310022830963135,
+   1.5592373609542847
+  ],
+  "tods": {
+   "02": {
+    "gm": [
+     100.50682830810547,
+     126.49478912353516,
+     137.31735229492188
+    ],
+    "gs": [
+     46.32875061035156,
+     2.0106990337371826,
+     5.872209072113037
+    ],
+    "nudge": [
+     3,
+     3
+    ],
+    "cx": 556,
+    "sit": 615,
+    "key": "right",
+    "keyRgb": [
+     255,
+     196,
+     140
+    ],
+    "rim": 0.3,
+    "grad": 0.16,
+    "ao": 0.86,
+    "hiCompress": null
+   },
+   "03": {
+    "gm": [
+     119.18782806396484,
+     135.023193359375,
+     132.45440673828125
+    ],
+    "gs": [
+     62.60712432861328,
+     3.7740583419799805,
+     12.520962715148926
+    ],
+    "nudge": [
+     0,
+     12
+    ],
+    "cx": 685,
+    "sit": 584,
+    "key": "left",
+    "keyRgb": [
+     255,
+     150,
+     70
+    ],
+    "rim": 0.38,
+    "grad": 0.18,
+    "ao": 0.8,
+    "hiCompress": null
+   },
+   "04": {
+    "gm": [
+     91.42743682861328,
+     129.8481903076172,
+     114.07475280761719
+    ],
+    "gs": [
+     56.52383041381836,
+     1.4181996583938599,
+     4.679364204406738
+    ],
+    "nudge": [
+     0,
+     0
+    ],
+    "cx": 717,
+    "sit": 618,
+    "key": "left",
+    "keyRgb": [
+     120,
+     170,
+     255
+    ],
+    "rim": 0.22,
+    "grad": 0.1,
+    "ao": 0.78,
+    "hiCompress": 0.68
+   },
+   "05": {
+    "gm": [
+     156.0478973388672,
+     127.74188232421875,
+     121.07835388183594
+    ],
+    "gs": [
+     60.675052642822266,
+     1.0317219495773315,
+     5.10873556137085
+    ],
+    "nudge": [
+     0,
+     0
+    ],
+    "cx": 634,
+    "sit": 622,
+    "key": "left",
+    "keyRgb": [
+     255,
+     252,
+     245
+    ],
+    "rim": 0.18,
+    "grad": 0.1,
+    "ao": 0.9,
+    "hiCompress": null
+   }
+  }
+ }
+}

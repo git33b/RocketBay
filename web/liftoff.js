@@ -7,14 +7,18 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "liftoff48";
+  const BUILD = "liftoff49";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
   const EXIT_DUR = 1.5;    // camera eases off, rocket exits top — flight ends on the flight
   const CLIMB_A = 140;
-  const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out floor (world scale)
-  const NOSE_FRAC = 0.10;     // nose ~10% below the top edge during follow     // native px / s² (t² climb)
+  const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
+  const ZOOM_LAND_FLOOR = 0.56; // adaptive landscape zoom never goes below this
+  const PLUME_MIN_CSS = 170;  // landscape follow: keep >=150 px of plume on screen below the nozzle
+  const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow
+  const NOSE_FRAC_LAND = 0.055; // landscape: nose ~5.5% below the top edge
+  const HULL_K = 1.3;         // flame sizing: modular core bottom width -> hull (fin-span) equivalent     // native px / s² (t² climb)
   const BUF_DIV = 2; // smoke/glow cells = 2 CSS px max (no mosaic)
 
   const TOD_GLOW = {
@@ -123,6 +127,7 @@
   };
 
   LiftoffEngine.prototype.reset = function () {
+    this._altBlendT0 = null; this._altBlendU = 0;
     this.stop();
     this.phase = "idle";
     this.countdown = 5;
@@ -164,7 +169,6 @@
       stack.style.clipPath = "";
       stack.style.webkitClipPath = "";
     }
-    this._nozzleLiftN = 0;
     const world = this.getWorldEl();
     if (world) { world.style.transform = "translate3d(0,0,0)"; world.style.transformOrigin = ""; }
     const sky = this.getSkyEl();
@@ -334,7 +338,28 @@
       }
       const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
       this._skyTopRgb = [med(R), med(G), med(B)];
-    } else this._skyTopRgb = null;
+      // per-row median of the plate's top band (painted sky gradient) for the 03 blend
+      const rows = [];
+      for (let yy = 0; yy < N; yy++) {
+        const r = [], g = [], b = [];
+        for (let x = 0; x < nw; x += 4) { const i = (yy * nw + x) * 4; r.push(bandData[i]); g.push(bandData[i + 1]); b.push(bandData[i + 2]); }
+        rows.push([med(r), med(g), med(b)]);
+      }
+      this._skyRows = rows; this._skyRowsN = N;
+      // full-height sky column (row medians of the plate, rows 0..0.55 nh) for the 03 gradient
+      try {
+        const pc = document.createElement("canvas"); pc.width = nw; pc.height = nh;
+        const pg = pc.getContext("2d", { willReadFrequently: true }); pg.drawImage(plate, 0, 0);
+        const pd = pg.getImageData(0, 0, nw, nh).data;
+        const col = [];
+        for (let yy = 0; yy < Math.round(nh * 0.55); yy++) {
+          const r = [], g = [], b = [];
+          for (let x = 0; x < nw; x += 4) { const i = (yy * nw + x) * 4; r.push(pd[i]); g.push(pd[i + 1]); b.push(pd[i + 2]); }
+          col.push([med(r), med(g), med(b)]);
+        }
+        this._skyCol = col;
+      } catch (e) { this._skyCol = null; }
+    } else { this._skyTopRgb = null; this._skyRows = null; }
 
     function parseDeep(col) {
       if (col && col[0] === "#") {
@@ -519,10 +544,9 @@
     return c;
   };
 
-  // Kit art has horizontal streak garbage below the fins. Detect it on the composed
-  // #stack canvas (rows dominated by long same-colour runs) and clip it in liftoff.
-  LiftoffEngine.prototype._clipStackStreaks = function () {
-    this._nozzleLiftN = 0;
+  // Modular stacks are composed gap-free from clean kit pieces (no streak clipping).
+  // Measure the seated nose (camera framing) and hull width (flame sizing) only.
+  LiftoffEngine.prototype._measureStack = function () {
     const st = this.getStackEl && this.getStackEl();
     const lb = this._lb;
     if (!st || !lb || !st.width || !st.height) return;
@@ -530,46 +554,79 @@
     const w = st.width, h = st.height;
     let data;
     try { data = st.getContext("2d").getImageData(0, 0, w, h).data; } catch (e) { return; }
-    const A = (x, y) => data[(y * w + x) * 4 + 3] > 100;
-    let bot = -1, top = -1;
-    for (let y = h - 1; y >= 0 && bot < 0; y--) {
-      for (let x = 0; x < w; x++) if (A(x, y)) { bot = y; break; }
-    }
-    if (bot < 0) return;
+    let top = -1;
     for (let y = 0; y < h && top < 0; y++) {
-      for (let x = 0; x < w; x++) if (A(x, y)) { top = y; break; }
+      for (let x = 0; x < w; x++) if (data[(y * w + x) * 4 + 3] > 100) { top = y; break; }
     }
-    const maxScan = Math.max(4, Math.round((bot - top) * 0.25));
-    let clean = bot, okRun = 0;
-    for (let y = bot; y > bot - maxScan; y--) {
-      let n = 0, eq = 0;
-      for (let x = 1; x < w; x++) {
-        if (!A(x, y) || !A(x - 1, y)) continue;
-        n++;
-        const i = (y * w + x) * 4, j = i - 4;
-        if (Math.abs(data[i] - data[j]) + Math.abs(data[i + 1] - data[j + 1]) + Math.abs(data[i + 2] - data[j + 2]) < 24) eq++;
-      }
-      const streaky = n < 6 || eq / n > 0.82;
-      if (!streaky) { okRun++; if (okRun >= 3) { clean = y + 2; break; } }
-      else okRun = 0;
-    }
+    if (top < 0) return;
     const cssH = parseFloat(st.style.height) || (h / (this._dpr || 1));
     const pxPerCss = h / cssH;
-    // Seated nose (tip) in world-local CSS px — the follow camera frames the WHOLE rocket
     this._tipLocal0 = (parseFloat(st.style.top) || 0) + top / pxPerCss;
-    // Hull (fin-span) width at the clean bottom row — flame is sized from this, never the viewport
-    {
-      let x0 = -1, x1 = -1;
-      for (let x = 0; x < w; x++) if (A(x, Math.min(clean, bot))) { if (x0 < 0) x0 = x; x1 = x; }
-      if (x0 >= 0) this._hullWcss = (x1 - x0 + 1) / pxPerCss;
+    const seat = (this.getSeat && this.getSeat()) || {};
+    if (seat.hullW) this._hullWcss = seat.hullW * HULL_K * (lb.width / lb.nw);
+  };
+
+  // Landscape follow zoom target: fit nose (5.5% from top) + rocket + >=PLUME_MIN_CSS plume
+  LiftoffEngine.prototype._landZoomTarget = function () {
+    const lb = this._lb, seat = (this.getSeat && this.getSeat()) || {};
+    const wrapH = this._wrapH || 390;
+    const hN = seat.stackH || seat.targetH || 500;
+    const hCss = hN * (lb ? lb.height / lb.nh : 0.66);
+    return clamp((wrapH * (1 - NOSE_FRAC_LAND) - PLUME_MIN_CSS) / Math.max(1, hCss), ZOOM_LAND_FLOOR, ZOOM_LAND_MIN);
+  };
+
+  LiftoffEngine.prototype._sidePad = function (tall, nw, H, padN, left) {
+    const MIR = 12, EDGE = 24, WIDE = 240, BLUR = 90, XF = 40;
+    let src;
+    try {
+      src = tall.getContext("2d", { willReadFrequently: true }).getImageData(left ? 0 : nw - EDGE, 0, EDGE, H).data;
+    } catch (e) { return tall; }
+    // per-row edge mean, then vertical box blur
+    // per-row MEDIAN over a wide edge strip (by luminance) -> clouds / stars / spires are
+    // outvoted by the sky, so nothing gets smeared sideways into streaks
+    let wide;
+    try {
+      wide = tall.getContext("2d", { willReadFrequently: true }).getImageData(left ? 0 : nw - WIDE, 0, WIDE, H).data;
+    } catch (e) { wide = null; }
+    const row = new Float32Array(H * 3), blur = new Float32Array(H * 3);
+    const lum = new Float32Array(WIDE), idx = new Array(WIDE);
+    for (let y = 0; y < H; y++) {
+      if (wide) {
+        for (let x = 0; x < WIDE; x++) { const i = (y * WIDE + x) * 4; lum[x] = wide[i] * 0.3 + wide[i + 1] * 0.59 + wide[i + 2] * 0.11; idx[x] = x; }
+        idx.sort((p, q) => lum[p] - lum[q]);
+        // average the 35-55th percentile band (robust median)
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let q = Math.floor(WIDE * 0.25); q < Math.floor(WIDE * 0.45); q++) { const i = (y * WIDE + idx[q]) * 4; r += wide[i]; g += wide[i + 1]; b += wide[i + 2]; n++; }
+        row[y * 3] = r / n; row[y * 3 + 1] = g / n; row[y * 3 + 2] = b / n;
+      } else {
+        let r = 0, g = 0, b = 0;
+        for (let x = 0; x < EDGE; x++) { const i = (y * EDGE + x) * 4; r += src[i]; g += src[i + 1]; b += src[i + 2]; }
+        row[y * 3] = r / EDGE; row[y * 3 + 1] = g / EDGE; row[y * 3 + 2] = b / EDGE;
+      }
     }
-    if (clean >= bot) return;
-    const insetCss = Math.round((h - (clean + 1)) / pxPerCss);
-    const streakCss = (bot - clean) / pxPerCss;
-    st.style.clipPath = "inset(0px 0px " + insetCss + "px 0px)";
-    st.style.webkitClipPath = st.style.clipPath;
-    this._nozzleLiftN = Math.round(streakCss / (lb.height / lb.nh));
-    this._stackStreakInfo = { bot: bot, clean: clean, insetCss: insetCss, liftN: this._nozzleLiftN };
+    for (let y = 0; y < H; y++) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let k = -BLUR; k <= BLUR; k++) { const yy = y + k; if (yy < 0 || yy >= H) continue; r += row[yy * 3]; g += row[yy * 3 + 1]; b += row[yy * 3 + 2]; n++; }
+      blur[y * 3] = r / n; blur[y * 3 + 1] = g / n; blur[y * 3 + 2] = b / n;
+    }
+    const c = document.createElement("canvas"); c.width = padN; c.height = H;
+    const g2 = c.getContext("2d");
+    const img = g2.createImageData(padN, H), d = img.data;
+    for (let y = 0; y < H; y++) {
+      for (let j = 0; j < padN; j++) {
+        // j = distance from the seam (0 = adjacent to the plate edge)
+        const x = left ? padN - 1 - j : j;
+        const o = (y * padN + x) * 4;
+        const m = Math.min(EDGE - 1, j); // mirrored source column (distance from edge)
+        const si = (y * EDGE + (left ? m : EDGE - 1 - m)) * 4;
+        const t = j < MIR ? 0 : Math.min(1, (j - MIR) / XF);
+        const e = t * t * (3 - 2 * t);
+        const mr = j < EDGE ? src[si] : blur[y * 3], mg = j < EDGE ? src[si + 1] : blur[y * 3 + 1], mb = j < EDGE ? src[si + 2] : blur[y * 3 + 2];
+        d[o] = mr * (1 - e) + blur[y * 3] * e; d[o + 1] = mg * (1 - e) + blur[y * 3 + 1] * e; d[o + 2] = mb * (1 - e) + blur[y * 3 + 2] * e; d[o + 3] = 255;
+      }
+    }
+    g2.putImageData(img, 0, 0);
+    return c;
   };
 
   LiftoffEngine.prototype.drawTallSky = function () {
@@ -604,7 +661,8 @@
     // Landscape: mirror-padded side strips (continuous at the edge) so the follow zoom-out
     // never exposes empty margins. Portrait cover is already wider than the screen.
     const landscape = (this._wrapW || 844) > (this._wrapH || 390);
-    const padCss = landscape ? Math.ceil(lb.width * (1 / ZOOM_LAND_MIN - 1) / 2) + 8 : 0;
+    const zPad = landscape ? (this._zoomLand || this._landZoomTarget()) : 1;
+    const padCss = landscape ? Math.ceil(lb.width * (1 / zPad - 1) / 2) + 8 : 0;
     const centerW = Math.max(1, Math.round(lb.width * dpr));
     const padPx = Math.round(padCss * dpr);
     const cw = centerW + 2 * padPx;
@@ -627,12 +685,13 @@
       // ONE blit of the entire tall bitmap (extension + exact plate) — contiguous, no tear
       ctx.drawImage(tall, 0, 0, nw, nh + ext, padPx, 0, centerW, ch);
       if (padPx > 0) {
+        // Side fill: a narrow mirror (12 native px) at the seam, then the edge colour per row
+        // (mean of the outer 24 columns, vertically blurred) -> the plate's sun/tower can
+        // never repeat in the margin, and no hard horizontal streaks.
         const padN = Math.min(nw, Math.ceil((padPx / centerW) * nw));
-        ctx.setTransform(-1, 0, 0, 1, padPx, 0);
-        ctx.drawImage(tall, 0, 0, padN, nh + ext, 0, 0, padPx, ch);
-        ctx.setTransform(-1, 0, 0, 1, 2 * padPx + centerW, 0);
-        ctx.drawImage(tall, nw - padN, 0, padN, nh + ext, 0, 0, padPx, ch);
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        const L = this._sidePad(tall, nw, nh + ext, padN, true), R = this._sidePad(tall, nw, nh + ext, padN, false);
+        ctx.drawImage(L, 0, 0, padN, nh + ext, 0, 0, padPx, ch);
+        ctx.drawImage(R, 0, 0, padN, nh + ext, padPx + centerW, 0, padPx, ch);
       }
       this._tallSkyDrawnKey = key;
     }
@@ -790,10 +849,11 @@
     this._bufH = bufH;
     this._bScale = bufW / wrapW; // css → buf
 
+    this._zoomLand = this._landZoomTarget();
     this.buildTallSky();
     this.buildParallax();
     this.drawTallSky();
-    this._clipStackStreaks();
+    this._measureStack();
 
     const px = this.getParallaxEl();
     if (px) px.style.display = "none"; // v3: altitude layer (#altSky) owns stars/clouds
@@ -883,8 +943,8 @@
   };
 
   LiftoffEngine.prototype.nozzleNative = function (seat) {
-    // _nozzleLiftN: clean hull bottom above kit-art streak rows (clipped in liftoff)
-    const ny = (seat.nozzleY != null ? seat.nozzleY : seat.sitY) - this.rocketY - (this._nozzleLiftN || 0);
+    // modular stack: nozzle row = first-stage feet (side boosters are flush with them)
+    const ny = (seat.nozzleY != null ? seat.nozzleY : seat.sitY) - this.rocketY;
     return { x: seat.cx, y: ny };
   };
 
@@ -1003,8 +1063,8 @@
     ];
 
     for (let ni = 0; ni < nozzles.length; ni++) {
-      const isSide = nozzles.length > 1 && nozzles[ni] !== 0;
-      const scaleN = isSide ? 0.42 : 1;
+      const isSide = ni > 0;
+      const scaleN = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
       const nx = nz.x + nozzles[ni];
       const css = this.cssFromNative(nx, nz.y);
       const bx = css.x * bs;
@@ -1298,6 +1358,7 @@
           // flanks + tail cool faster -> tapered tail
           let pc = baseCool * (from >= 28 ? 1.75 : from >= 14 ? 0.8 : 1.45)
             * (edge > 0.8 ? 1.6 : 1) * (1 + 1.8 * yf * yf * (0.35 + edge));
+          if (o.cool) pc *= o.cool;
           while (pc > 0) { if (rand() < Math.min(1, pc)) next--; pc -= 1; }
           if (from < 16 && edge > 0.5 && rand() < 0.08) next -= 3 + ((rand() * 4) | 0);
           if (from >= 26 && rand() < 0.04) next = Math.min(heat, next + 2);
@@ -1379,7 +1440,13 @@
     const nozzleScreenY = css0.y;
     const visRows = Math.max(8, Math.ceil(wrapH - nozzleScreenY + 4));
     // Plume may run off the bottom edge during follow (camera frames the whole rocket)
-    const lenBase = hullW * lenRatio;
+    let lenBase = hullW * lenRatio;
+    if ((this._wrapW || 844) > wrapH && (this.phase === "climb" || this.phase === "exit")) {
+      // landscape follow: plume scales with the rocket's on-screen height so the >=150 px of
+      // room below the nozzle actually carries plume (it widens with altitude below)
+      const rocketCss = (seat.stackH || seat.targetH || 480) * (lb.height / lb.nh) * zf;
+      lenBase = Math.max(lenBase, rocketCss * (0.45 + 0.4 * u));
+    }
     const lenCss = lenBase * flick;
     const seedHalf = Math.round(hullW * 0.34 * (1 + 0.25 * u));
     // Plume widens with altitude (lower ambient pressure): per-row horizontal stretch at blit
@@ -1388,7 +1455,9 @@
     const fh = Math.ceil(wrapH * 1.05);
     const field = this._ensureFireField(fw, fh);
     const rows = Math.min(fh, visRows, Math.ceil(lenCss * 1.2));
-    this._tickFire(field, { seedHalf: seedHalf, heat: 36, len: lenCss, rows: rows, expand: 1 });
+    // long landscape plume: slower cooling so the narrow modular hull still burns the full length
+    const cool = lenBase > hullW * lenRatio + 1 ? clamp((hullW * lenRatio * 0.5) / lenBase, 0.2, 1) : 1;
+    this._tickFire(field, { seedHalf: cool < 1 ? Math.round(seedHalf * 1.4) : seedHalf, heat: 36, len: lenCss, rows: rows, expand: 1, cool: cool });
     this._paintFireBuf(field, pal);
     const ar = Math.max(1, field.activeRows || rows);
     try { global.__liftoffFlameDbg = { hullW: hullW, lenCss: lenCss, seedHalf: seedHalf, rows: ar, fw: fw, u: u }; } catch (_) {}
@@ -1397,8 +1466,8 @@
     ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = "source-over";
     for (let ni = 0; ni < nozzles.length; ni++) {
-      const isSide = nozzles.length > 1 && nozzles[ni] !== 0;
-      const sc = isSide ? 0.42 : 1;
+      const isSide = ni > 0;
+      const sc = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
       const cw0 = this.cssFromNative(nz.x + nozzles[ni], nz.y);
       const css = this._w2s(cw0.x, cw0.y);
       ctx.globalAlpha = isSide ? 0.75 : 1;
@@ -1580,14 +1649,39 @@
       upA = mix3(mix3(base, [20, 20, 70], clamp(k * 2, 0, 1)), [4, 6, 24], clamp(k * 2 - 1, 0, 1));
       loA = mix3(mix3(base, [40, 36, 100], clamp(k * 2, 0, 1)), [10, 14, 44], clamp(k * 2 - 1, 0, 1));
     }
+    // 03 sunset: the painted sky cross-fades over ~1.5 s into a vertical gradient that starts
+    // from the plate's own top-band colours (row medians, mirrored like the extension), which
+    // then darkens with altitude — no jump to a flat colour.
+    const blendPlate = tod === "03" && this._skyRows;
+    let tBlend = 1;
+    if (blendPlate) {
+      const topAbove = (lb.top - (4 - cy) / zA) / scaleY; // extension row at the top screen band
+      if (this._altBlendT0 == null && topAbove > clean * 0.2) this._altBlendT0 = this._simTime;
+      tBlend = this._altBlendT0 == null ? 0 : smooth01(0, 1.5, this._simTime - this._altBlendT0);
+      this._altBlendU = tBlend;
+    }
     {
       const band = 4;
       const f0 = clean * 0.2, f1 = clean * 0.5 + 6; // opaque before the mirror fold (N)
+      const Nr = this._skyRowsN || 128;
       for (let y = 0; y < H; y += band) {
         const aboveN = (lb.top - (y + band - cy) / zA) / scaleY; // extension row (native) at this screen row
-        const rowA = smooth01(f0, f1, aboveN);
+        let rowA = smooth01(f0, f1, aboveN);
+        if (blendPlate) rowA *= tBlend;
         if (rowA <= 0.003) continue;
-        const col = mix3(upA, loA, y / H);
+        let col = mix3(upA, loA, y / H);
+        if (blendPlate) {
+          // screen-space sunset gradient: top = plate top colour; the lower screen warms toward
+          // the plate's mid-sky (magenta/orange) only once the plate's top edge has left the
+          // screen (no inverted band above the seam); everything darkens with altitude (k).
+          const sc = this._skyCol || this._skyRows;
+          const seamY = zA * lb.top + cy;
+          const warm = smooth01(H * 0.7, H * 1.3, seamY);
+          const rMax = (sc.length - 1) * 0.78 * (1 - 0.8 * k);
+          const ri = Math.round(warm * rMax * Math.pow(clamp(y / H, 0, 1), 1.4));
+          const pc = sc[Math.max(0, Math.min(sc.length - 1, ri))];
+          col = mix3(pc, mix3(upA, loA, y / H), k);
+        }
         g.globalAlpha = rowA;
         g.fillStyle = rgbaStr(col, 1);
         g.fillRect(0, y, W, band);
@@ -1705,9 +1799,9 @@
       // the bottom. Landscape can't fit stack + plume -> gentle zoom-out eased over ~1 s
       // after pickup (smoothstep: zero slope at both ends -> no jerk).
       const zoomU = this._pickupT >= 0 ? smooth01(0, 1.0, this.climbT - this._pickupT) : 0;
-      const zT = landscape ? ZOOM_LAND_MIN : 1;
+      const zT = landscape ? (this._zoomLand || ZOOM_LAND_MIN) : 1;
       z = 1 - (1 - zT) * zoomU;
-      const noseTarget = wrapH * NOSE_FRAC;
+      const noseTarget = wrapH * (landscape ? NOSE_FRAC_LAND : NOSE_FRAC);
       // never push the camera during the hold: start from the seated nose, glide to 10%
       // C1 soft pickup of width 2*Wp that converges EXACTLY on tgt; starts when the nose is
       // Wp below tgt, so the seated rocket never moves the camera during the hold.
@@ -1789,6 +1883,8 @@
         zoom: this._zoom, pickupT: this._pickupT,
         noseScreenY: this._tipLocal0 != null ? (this._zoom || 1) * (this._tipLocal0 - this.rocketY * (this._lb.height / this._lb.nh)) + (this._camYi || 0) : null,
         exitT: this.exitT, flame: this.flameIntensity, finished: this.finished,
+        zoomLand: this._zoomLand, skyBlendU: this._altBlendU || 0,
+        nozzleScreenY: this._lb ? (this._zoom || 1) * (this._lb.top + (seat.sitY - this.rocketY) * (this._lb.height / this._lb.nh)) + (this._camYi || 0) : null,
         app: BUILD,
       };
     } catch (_) {}

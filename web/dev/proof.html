@@ -1,0 +1,28 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>modular proof harness</title></head><body>
+<script src="../modular.js"></script>
+<script>
+window.renderProof = async function (tod, ids, sides) {
+  const MB = window.RocketBayModular;
+  if (!window.__kit) window.__kit = await MB.loadKit("../kit/modular/");
+  const K = window.__kit, L = K.lighting, cfg = L.tods[tod];
+  const st = MB.composeStack(K.pieces, K.metas, ids, sides);
+  const lit = MB.light(st, cfg, L.kitMean, L.kitStd);
+  const pad = await new Promise((r) => { const im = new Image(); im.onload = () => r(im); im.src = `../plates/empty/${tod}-empty-pad-v5.png`; });
+  const c = document.createElement("canvas"); c.width = 1280; c.height = 720;
+  const g = c.getContext("2d"); g.drawImage(pad, 0, 0);
+  const img = g.getImageData(0, 0, 1280, 720), d = img.data;
+  const s = MB.seatPos({ w: st.w, h: st.h, data: lit, axisX: st.axisX }, cfg.cx, cfg.sit);
+  const mask = new Uint8Array(1280 * 720);
+  for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
+    const X = s.left + x, Y = s.top + y; if (X < 0 || Y < 0 || X >= 1280 || Y >= 720) continue;
+    const i = (y * st.w + x) * 4; if (!lit[i + 3]) continue;
+    const o = (Y * 1280 + X) * 4; d[o] = lit[i]; d[o + 1] = lit[i + 1]; d[o + 2] = lit[i + 2]; mask[Y * 1280 + X] = 1;
+  }
+  const sh = MB.contactShadow((x, y) => mask[y * 1280 + x] === 1, cfg.sit);
+  sh.forEach((p) => { const o = (p.y * 1280 + p.x) * 4; for (let k = 0; k < 3; k++) d[o + k] = Math.round(d[o + k] * p.f); });
+  g.putImageData(img, 0, 0);
+  const sc = document.createElement("canvas"); sc.width = st.w; sc.height = st.h;
+  sc.getContext("2d").putImageData(new ImageData(lit, st.w, st.h), 0, 0);
+  return { png: c.toDataURL("image/png"), stackPng: sc.toDataURL("image/png"), seat: s, w: st.w, h: st.h, axisX: st.axisX, joins: st.joins, layers: st.layers };
+};
+</script></body></html>
