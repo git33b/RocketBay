@@ -18,7 +18,7 @@
 (function (global) {
   "use strict";
 
-  const DEFAULT_SIT = 548;
+  const DEFAULT_SIT = 548; // legacy; v5 plates use per-TOD sit (= deck) from _meta-v5.json
   const DEFAULT_TARGET_H = 500;
 
   /** @type {Record<string, {
@@ -28,39 +28,39 @@
   const PAD_CONFIG = {
     "02": {
       cx: 556,
-      sitY: DEFAULT_SIT,
-      deckY: DEFAULT_SIT,
+      sitY: 615,
+      deckY: 615,
       targetH: DEFAULT_TARGET_H,
       nozzleOffsetY: 0,
-      smokeOriginY: DEFAULT_SIT,
-      emptyPad: "plates/empty/02-empty-pad-v2.png",
+      smokeOriginY: 615,
+      emptyPad: "plates/empty/02-empty-pad-v5.png",
     },
     "03": {
       cx: 685,
-      sitY: DEFAULT_SIT,
-      deckY: DEFAULT_SIT,
+      sitY: 630,
+      deckY: 630,
       targetH: DEFAULT_TARGET_H,
       nozzleOffsetY: 0,
-      smokeOriginY: DEFAULT_SIT,
-      emptyPad: "plates/empty/03-empty-pad-v2.png",
+      smokeOriginY: 630,
+      emptyPad: "plates/empty/03-empty-pad-v5.png",
     },
     "04": {
       cx: 717,
-      sitY: DEFAULT_SIT,
-      deckY: DEFAULT_SIT,
+      sitY: 618,
+      deckY: 618,
       targetH: DEFAULT_TARGET_H,
       nozzleOffsetY: 0,
-      smokeOriginY: DEFAULT_SIT,
-      emptyPad: "plates/empty/04-empty-pad-v2.png",
+      smokeOriginY: 618,
+      emptyPad: "plates/empty/04-empty-pad-v5.png",
     },
     "05": {
       cx: 634,
-      sitY: DEFAULT_SIT,
-      deckY: DEFAULT_SIT, // v3: measure real deck (~590+); leave = sitY until then
+      sitY: 622,
+      deckY: 622,
       targetH: DEFAULT_TARGET_H,
       nozzleOffsetY: 0,
-      smokeOriginY: DEFAULT_SIT,
-      emptyPad: "plates/empty/05-empty-pad-v2.png",
+      smokeOriginY: 622,
+      emptyPad: "plates/empty/05-empty-pad-v5.png",
     },
   };
 

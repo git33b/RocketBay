@@ -197,14 +197,14 @@
     </div>
   </div>
 
-  <script src="pad-config.js?v=pad3"></script>
-  <script src="liftoff.js?v=liftoff45"></script>
+  <script src="pad-config.js?v=pad5v5"></script>
+  <script src="liftoff.js?v=liftoff46"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "compose4";
-    const PAD_VER = "pad1";
-    const APP_VER = "liftoff45";
+    const PAD_VER = "pad5";
+    const APP_VER = "liftoff46";
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
@@ -212,7 +212,7 @@
       return {
         cx: 640, sitY: 548, deckY: 548, targetH: 500,
         nozzleOffsetY: 0, smokeOriginY: 548,
-        emptyPad: "plates/empty/" + todId + "-empty-pad-v2.png",
+        emptyPad: "plates/empty/" + todId + "-empty-pad-v5.png",
       };
     }
 

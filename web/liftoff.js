@@ -186,7 +186,9 @@
 
     // Day empty-pad art has a removed-rocket ghost with hard horizontal bands in the
     // seat footprint; repair it on a plate COPY, then blit that copy once (contiguous).
-    const src = (pal.parallax === "day") ? this._deghostPlate(plate, nw, nh) : plate;
+    // v5 empty pads (CoE-passed) already fill the hull hole cleanly — runtime de-ghost disabled
+    // (it would flatten v5's textured fill). Kept behind a flag for legacy v2 plates only.
+    const src = (this.deghostLegacy && pal.parallax === "day") ? this._deghostPlate(plate, nw, nh) : plate;
 
     // Exact full plate — ONE contiguous blit; never overwrite [ext, ext+nh) later
     ctx.drawImage(src, 0, 0, nw, nh, 0, ext, nw, nh);
@@ -1492,7 +1494,7 @@
         ignited: this.ignited, released: this.released,
         rocketY: this.rocketY, camY: this.camY, climbT: this.climbT,
         lingerT: this.lingerT, flame: this.flameIntensity,
-        app: "liftoff44",
+        app: "liftoff46",
       };
     } catch (_) {}
 
@@ -1604,7 +1606,7 @@
       global.__liftoffState = {
         elapsed: 0, phase: this.phase, countdown: 5,
         ignited: false, released: false, rocketY: 0, camY: 0,
-        climbT: 0, lingerT: 0, flame: 0, app: "liftoff44",
+        climbT: 0, lingerT: 0, flame: 0, app: "liftoff46",
       };
     } catch (_) {}
     if (!this.captureMode) {
