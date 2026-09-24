@@ -7,12 +7,14 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "liftoff47";
+  const BUILD = "liftoff48";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
   const EXIT_DUR = 1.5;    // camera eases off, rocket exits top — flight ends on the flight
-  const CLIMB_A = 140;     // native px / s² (t² climb)
+  const CLIMB_A = 140;
+  const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out floor (world scale)
+  const NOSE_FRAC = 0.10;     // nose ~10% below the top edge during follow     // native px / s² (t² climb)
   const BUF_DIV = 2; // smoke/glow cells = 2 CSS px max (no mosaic)
 
   const TOD_GLOW = {
@@ -103,6 +105,18 @@
     this.reset();
   }
 
+  // World -> screen (CSS px): screen = z * world + (tx, T). z<1 only during landscape follow.
+  LiftoffEngine.prototype._w2s = function (x, y) {
+    const z = this._zoom || 1;
+    return { x: z * x + (this._tx || 0), y: z * y + (this._camYi || 0) };
+  };
+  // Inverse of the #world transform for layers that must stay screen-fixed (altSky, fx)
+  LiftoffEngine.prototype._screenFixedTransform = function () {
+    const z = this._zoom || 1, tx = this._tx || 0, T = this._camYi || 0;
+    if (z === 1 && !tx) return T ? ("translate3d(0," + (-T) + "px,0)") : "";
+    return "scale(" + (1 / z) + ") translate3d(" + (-tx) + "px," + (-T) + "px,0)";
+  };
+
   LiftoffEngine.prototype._rand = function () {
     this._rng = (this._rng * 1664525 + 1013904223) >>> 0;
     return (this._rng & 0xffff) / 0x10000;
@@ -126,6 +140,10 @@
     this._prevCamY = 0;
     this._smokeAcc = 0;
     this.finished = false;
+    this._zoom = 1;
+    this._tx = 0;
+    this._pickupT = -1;
+    this._tipLocal0 = null;
     this.flameIntensity = 0;
     this.releaseFlash = 0;
     this.perf.length = 0;
@@ -148,7 +166,7 @@
     }
     this._nozzleLiftN = 0;
     const world = this.getWorldEl();
-    if (world) world.style.transform = "translate3d(0,0,0)";
+    if (world) { world.style.transform = "translate3d(0,0,0)"; world.style.transformOrigin = ""; }
     const sky = this.getSkyEl();
     if (sky) {
       sky.style.display = "";
@@ -537,6 +555,8 @@
     }
     const cssH = parseFloat(st.style.height) || (h / (this._dpr || 1));
     const pxPerCss = h / cssH;
+    // Seated nose (tip) in world-local CSS px — the follow camera frames the WHOLE rocket
+    this._tipLocal0 = (parseFloat(st.style.top) || 0) + top / pxPerCss;
     // Hull (fin-span) width at the clean bottom row — flame is sized from this, never the viewport
     {
       let x0 = -1, x1 = -1;
@@ -581,17 +601,23 @@
     const nw = this._tallSkyNw | 0;
     const extCss = (ext / nh) * lb.height;
     const totalH = lb.height + extCss;
-    const cw = Math.max(1, Math.round(lb.width * dpr));
+    // Landscape: mirror-padded side strips (continuous at the edge) so the follow zoom-out
+    // never exposes empty margins. Portrait cover is already wider than the screen.
+    const landscape = (this._wrapW || 844) > (this._wrapH || 390);
+    const padCss = landscape ? Math.ceil(lb.width * (1 / ZOOM_LAND_MIN - 1) / 2) + 8 : 0;
+    const centerW = Math.max(1, Math.round(lb.width * dpr));
+    const padPx = Math.round(padCss * dpr);
+    const cw = centerW + 2 * padPx;
     const ch = Math.max(1, Math.round(totalH * dpr));
 
     // INTEGER CSS box — fractional top/height causes a full-frame horizontal sampling tear
-    canvas.style.left = Math.round(lb.left) + "px";
+    canvas.style.left = (Math.round(lb.left) - padCss) + "px";
     canvas.style.top = Math.round(lb.top - extCss) + "px";
-    canvas.style.width = Math.round(lb.width) + "px";
+    canvas.style.width = (Math.round(lb.width) + 2 * padCss) + "px";
     canvas.style.height = Math.round(totalH) + "px";
     canvas.style.display = "block";
 
-    const key = [cw, ch, nw, nh, ext, this.getTodId()].join(":");
+    const key = [cw, ch, nw, nh, ext, padPx, this.getTodId()].join(":");
     if (canvas.width !== cw || canvas.height !== ch || this._tallSkyDrawnKey !== key) {
       canvas.width = cw;
       canvas.height = ch;
@@ -599,7 +625,15 @@
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
       // ONE blit of the entire tall bitmap (extension + exact plate) — contiguous, no tear
-      ctx.drawImage(tall, 0, 0, nw, nh + ext, 0, 0, cw, ch);
+      ctx.drawImage(tall, 0, 0, nw, nh + ext, padPx, 0, centerW, ch);
+      if (padPx > 0) {
+        const padN = Math.min(nw, Math.ceil((padPx / centerW) * nw));
+        ctx.setTransform(-1, 0, 0, 1, padPx, 0);
+        ctx.drawImage(tall, 0, 0, padN, nh + ext, 0, 0, padPx, ch);
+        ctx.setTransform(-1, 0, 0, 1, 2 * padPx + centerW, 0);
+        ctx.drawImage(tall, nw - padN, 0, padN, nh + ext, 0, 0, padPx, ch);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
       this._tallSkyDrawnKey = key;
     }
 
@@ -1038,7 +1072,8 @@
     }
     const tones = this._smokeTones, lits = this._smokeLitTones;
     const lb = this._lb, bs = this._bScale;
-    const pxN = (lb.width / lb.nw) * bs; // native -> buffer px
+    const zs = this._zoom || 1;
+    const pxN = (lb.width / lb.nw) * bs * zs; // native -> buffer px (zoomed)
     const riseCss = this.rocketY * (lb.height / lb.nh);
     const engineNear = clamp(1 - riseCss / 140, 0, 1) * clamp(this.flameIntensity, 0, 1);
     const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
@@ -1053,8 +1088,9 @@
         const sizeK = isTrail ? 1 : (1.25 - 0.6 * clamp(dist, 0, 1));
         const r = Math.max(1.5, o.size * 0.5 * sizeK * pxN);
         const ry = r * 0.78;
-        const css = this.cssFromNative(o.x, o.y);
-        const bx = css.x * bs, by = css.y * bs + cyB;
+        const cw0 = this.cssFromNative(o.x, o.y);
+        const css = this._w2s(cw0.x, cw0.y);
+        const bx = css.x * bs, by = css.y * bs;
         if (bx + r < 0 || bx - r >= W || by + ry < 0 || by - ry >= H) continue;
         const fade = smooth01(0.68, 1, t);
         const seed = (i * 2654435761) >>> 0;
@@ -1153,15 +1189,14 @@
     const pal = TOD_GLOW[this.getTodId()] || TOD_GLOW["05"];
     // FX canvas is SCREEN-fixed (counter-translated against world camY) so the flame
     // can never be clipped at the canvas top on high pans; draw world coords with +camY.
-    const cy = this._camYi || 0;
     const fxEl = this.getFxCanvas();
-    if (fxEl) fxEl.style.transform = cy ? ("translate3d(0," + (-cy) + "px,0)") : "";
+    if (fxEl) { fxEl.style.transformOrigin = "0 0"; fxEl.style.transform = this._screenFixedTransform(); }
     const bs = this._bScale;
-    const cyB = Math.round(cy * bs);
+    const zz = this._zoom || 1;
     bctx.setTransform(1, 0, 0, 1, 0, 0);
     bctx.imageSmoothingEnabled = false;
-    this.drawSmoke(bctx, seat, pal, cyB);
-    bctx.setTransform(1, 0, 0, 1, 0, cyB);
+    this.drawSmoke(bctx, seat, pal, 0);
+    bctx.setTransform(zz, 0, 0, zz, (this._tx || 0) * bs, (this._camYi || 0) * bs);
     this.drawPadGlow(bctx, seat, pal);
     bctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -1169,11 +1204,10 @@
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, this._wrapW, this._wrapH);
     ctx.globalCompositeOperation = "source-over";
-    const dyB = Math.round(cy - cyB / bs);
-    ctx.drawImage(this._buf, 0, 0, this._bufW, this._bufH, 0, dyB, this._wrapW, this._wrapH);
+    ctx.drawImage(this._buf, 0, 0, this._bufW, this._bufH, 0, 0, this._wrapW, this._wrapH);
 
     if (this.ignited) {
-      ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, cy * this._dpr);
+      ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0); // flame computed in screen px
       this.drawFlameDisplay(ctx, seat, pal);
       ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     }
@@ -1326,7 +1360,9 @@
     const stageW = Math.max(80, seat.width || 120);
     // Everything scales from the hull (fin-span) width in CSS px — identical proportions
     // in landscape and portrait (never from the viewport).
-    const hullW = Math.max(24, this._hullWcss || ((stageW / lb.nw) * lb.width * 0.76));
+    const zf = this._zoom || 1;
+    // (screen px) flame is simulated/rendered at the zoomed size -> 1 cell = 1 screen px
+    const hullW = Math.max(18, Math.round(zf * (this._hullWcss || ((stageW / lb.nw) * lb.width * 0.76))));
     const grow = clamp(this.flameIntensity, 0.2, 1.5);
     const u = this.phase === "climb" ? smooth01(0, 5, this.climbT)
       : (this.phase === "exit" ? 1 : 0);
@@ -1337,13 +1373,13 @@
     // Length flicker (not only edges): layered fast oscillation + noise
     const t = this._simTime;
     const flick = 1 + 0.11 * Math.sin(t * 43.0) + 0.07 * Math.sin(t * 27.3 + 1.7) + (this._rand() - 0.5) * 0.12;
-    const css0 = this.cssFromNative(nz.x, nz.y);
+    const cssW0 = this.cssFromNative(nz.x, nz.y);
+    const css0 = this._w2s(cssW0.x, cssW0.y); // screen px
     const wrapH = this._wrapH || 390;
-    const nozzleScreenY = css0.y + (this._camYi || 0);
+    const nozzleScreenY = css0.y;
     const visRows = Math.max(8, Math.ceil(wrapH - nozzleScreenY + 4));
-    let lenBase = hullW * lenRatio;
-    // Once the camera has the rocket, keep the tapered tail on screen (plume ends in frame)
-    if (this.phase === "climb" || this.phase === "exit") lenBase = Math.min(lenBase, Math.max(hullW * 1.9, (visRows - 6) * 0.9));
+    // Plume may run off the bottom edge during follow (camera frames the whole rocket)
+    const lenBase = hullW * lenRatio;
     const lenCss = lenBase * flick;
     const seedHalf = Math.round(hullW * 0.34 * (1 + 0.25 * u));
     // Plume widens with altitude (lower ambient pressure): per-row horizontal stretch at blit
@@ -1363,7 +1399,8 @@
     for (let ni = 0; ni < nozzles.length; ni++) {
       const isSide = nozzles.length > 1 && nozzles[ni] !== 0;
       const sc = isSide ? 0.42 : 1;
-      const css = this.cssFromNative(nz.x + nozzles[ni], nz.y);
+      const cw0 = this.cssFromNative(nz.x + nozzles[ni], nz.y);
+      const css = this._w2s(cw0.x, cw0.y);
       ctx.globalAlpha = isSide ? 0.75 : 1;
       const x0c = css.x, y0c = Math.round(css.y);
       const BAND = 2;
@@ -1380,7 +1417,7 @@
     // Exhaust trail toward pad — cooler, faster decay (early climb only)
     if (this.phase === "climb" && this.climbT < 2.6) {
       const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
-      const padCssY = lb.top + (deckY / lb.nh) * lb.height;
+      const padCssY = this._w2s(0, lb.top + (deckY / lb.nh) * lb.height).y;
       const trailLen = Math.max(16, padCssY - css0.y);
       const fade = clamp(1 - this.climbT / 2.4, 0, 1);
       if (fade > 0.06 && trailLen > 10) {
@@ -1506,12 +1543,14 @@
     const pal = TOD_GLOW[tod] || TOD_GLOW["05"];
     const mode = pal.parallax;
     if (!this._altStars) this._buildAltSprites(mode);
-    const alt = this.camY / scaleY; // native px of camera climb
+    const zA = this._zoom || 1;
+    const alt = (this.camY / zA) / scaleY; // native px of camera climb (world units)
     const v = Math.max(0, this._camVel || 0); // css px / s
     try { global.__liftoffAlt = { alt: alt, v: v }; } catch (_) {}
     if (cy <= 0 && !this.released) { c.style.display = "none"; return; }
     c.style.display = "block";
-    c.style.transform = "translate3d(0," + (-cy) + "px,0)"; // screen-fixed
+    c.style.transformOrigin = "0 0";
+    c.style.transform = this._screenFixedTransform(); // screen-fixed (inverse of world zoom/pan)
     const W = c.width, H = c.height;
     const g = c.getContext("2d");
     g.setTransform(1, 0, 0, 1, 0, 0);
@@ -1545,7 +1584,7 @@
       const band = 4;
       const f0 = clean * 0.2, f1 = clean * 0.5 + 6; // opaque before the mirror fold (N)
       for (let y = 0; y < H; y += band) {
-        const aboveN = (lb.top + cy - (y + band)) / scaleY; // extension row (native) at this screen row
+        const aboveN = (lb.top - (y + band - cy) / zA) / scaleY; // extension row (native) at this screen row
         const rowA = smooth01(f0, f1, aboveN);
         if (rowA <= 0.003) continue;
         const col = mix3(upA, loA, y / H);
@@ -1616,7 +1655,7 @@
     // mask: alpha follows overlay coverage (screen y where extension row crosses f0..f1)
     {
       const clean2 = this._tallSkyClean || 256;
-      const yAt = (aboveN) => lb.top + cy - aboveN * scaleY; // screen y for an extension row
+      const yAt = (aboveN) => zA * (lb.top - aboveN * scaleY) + cy; // screen y for an extension row
       const yTop = yAt(clean2 * 0.5 + 6), yBot = yAt(clean2 * 0.2);
       if (yBot < H) {
         fg.globalCompositeOperation = "destination-in";
@@ -1645,25 +1684,48 @@
       stack.style.transform = rise;
       stack.style.opacity = "1";
     }
-    const sitCss = (seat.sitY / lb.nh) * lb.height;
-    const nozzleLocalY = lb.top + sitCss - this.rocketY * scaleY;
-    const wrapH = this._wrapH || 390;
-    const portrait = (this._wrapW || 844) < wrapH;
-    if (this.phase === "exit") {
-      // Camera eases off (exponential decel) — rocket accelerates out of frame, no cut
-      const kk = 1.3;
-      this.camY = this._exitCam0 + (this._exitV0 / kk) * (1 - Math.exp(-kk * this.exitT));
-    } else if (this.released) {
-      // Deterministic C1 follow: soft pickup, then locks the nozzle at a fixed screen
-      // band and follows the t² climb exactly (so the camera keeps accelerating).
-      const Wp = 60;
-      const uc = smooth01(1.0, 5.0, this.climbT);
-      const desiredNozzle = wrapH * ((portrait ? 0.5 : 0.48) - (portrait ? 0.1 : 0.18) * uc) + Wp;
-      const raw = desiredNozzle - nozzleLocalY;
-      this.camY = raw <= 0 ? 0 : (raw < 2 * Wp ? (raw * raw) / (4 * Wp) : raw - Wp);
-    } else {
-      this.camY = 0;
+    const wrapH = this._wrapH || 390, wrapW = this._wrapW || 844;
+    const landscape = wrapW > wrapH;
+    const riseCss = this.rocketY * scaleY;
+    if (this._tipLocal0 == null) {
+      const sitCss0 = (seat.sitY / lb.nh) * lb.height;
+      this._tipLocal0 = lb.top + sitCss0 - (this._stackHcss || 300);
     }
+    const noseLocal = this._tipLocal0 - riseCss;       // world-local CSS y of the nose
+    const noseSeat = this._tipLocal0;                   // seated nose screen y (z=1, T=0)
+    const plateBottom = lb.top + lb.height;
+    let z = this._zoom || 1;
+    let T;
+    if (this.phase === "exit") {
+      // Camera eases off (exponential decel) at the settled zoom — rocket accelerates out, no cut
+      const kk = 1.3;
+      T = this._exitCam0 + (this._exitV0 / kk) * (1 - Math.exp(-kk * this.exitT));
+    } else if (this.released) {
+      // Follow = keep the WHOLE rocket framed: nose ~10% below the top edge, plume runs off
+      // the bottom. Landscape can't fit stack + plume -> gentle zoom-out eased over ~1 s
+      // after pickup (smoothstep: zero slope at both ends -> no jerk).
+      const zoomU = this._pickupT >= 0 ? smooth01(0, 1.0, this.climbT - this._pickupT) : 0;
+      const zT = landscape ? ZOOM_LAND_MIN : 1;
+      z = 1 - (1 - zT) * zoomU;
+      const noseTarget = wrapH * NOSE_FRAC;
+      // never push the camera during the hold: start from the seated nose, glide to 10%
+      // C1 soft pickup of width 2*Wp that converges EXACTLY on tgt; starts when the nose is
+      // Wp below tgt, so the seated rocket never moves the camera during the hold.
+      const Wp = clamp(noseSeat * 0.5, 8, 40);
+      const tgt0 = Math.min(noseTarget, noseSeat - Wp);
+      const tgt = lerp(tgt0, noseTarget, zoomU);
+      const d = tgt - z * noseLocal;                     // >0: nose would sit above tgt
+      T = d <= -Wp ? 0 : (d < Wp ? ((d + Wp) * (d + Wp)) / (4 * Wp) : d);
+      if (this._pickupT < 0 && T > 0.25) this._pickupT = this.climbT;
+      // never expose below the plate bottom while zoomed out
+      if (z < 1) z = Math.max(z, Math.min(1, (wrapH - T) / plateBottom));
+    } else {
+      T = 0; z = 1;
+    }
+    z = Math.round(z * 10000) / 10000;
+    this._zoom = z;
+    this._tx = z === 1 ? 0 : Math.round((1 - z) * wrapW / 2);
+    this.camY = T;
     const dt = this._lastDt || 1 / 60;
     const inst = (this.camY - (this._prevCamY || 0)) / dt;
     this._prevCamY = this.camY;
@@ -1673,8 +1735,10 @@
     this._shakeX = this.shake ? Math.round((this._rand() - 0.5) * 2 * this.shake) : 0;
     this._shakeY = 0;
     if (world) {
+      world.style.transformOrigin = "0 0";
       world.style.transform =
-        "translate3d(" + this._shakeX + "px," + this._camYi + "px,0)";
+        "translate3d(" + (this._tx + this._shakeX) + "px," + this._camYi + "px,0)" +
+        (this._zoom !== 1 ? " scale(" + this._zoom + ")" : "");
     }
     this.applyRocketLight();
     if (this.ignited || this.released) {
@@ -1722,6 +1786,8 @@
         elapsed: elapsed, phase: this.phase, countdown: this.countdown,
         ignited: this.ignited, released: this.released,
         rocketY: this.rocketY, camY: this.camY, camVel: this._camVel, climbT: this.climbT,
+        zoom: this._zoom, pickupT: this._pickupT,
+        noseScreenY: this._tipLocal0 != null ? (this._zoom || 1) * (this._tipLocal0 - this.rocketY * (this._lb.height / this._lb.nh)) + (this._camYi || 0) : null,
         exitT: this.exitT, flame: this.flameIntensity, finished: this.finished,
         app: BUILD,
       };

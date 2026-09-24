@@ -198,13 +198,13 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="liftoff.js?v=liftoff47"></script>
+  <script src="liftoff.js?v=liftoff48"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "compose4";
     const PAD_VER = "pad5";
-    const APP_VER = "liftoff47";
+    const APP_VER = "liftoff48";
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
@@ -742,7 +742,8 @@
       const fb = !!state.flightBackdrop && (p === "mission" || p === "outcome");
       document.getElementById("todRow").style.display = (p === "liftoff" || fb) ? "none" : "";
       document.getElementById("meta").style.display = (p === "liftoff") ? "none" : "";
-      document.getElementById("hud").style.display = (p === "liftoff") ? "none" : "";
+      // top pills hide from pad-ops/countdown on (tallest 03 tip reaches y~13 in landscape)
+      document.getElementById("hud").style.display = (p === "liftoff" || p === "grounded") ? "none" : "";
       missionBox.classList.toggle("on", p === "mission");
       outcomeBox.classList.toggle("on", p === "outcome");
       phaseHud.textContent = p.toUpperCase();
