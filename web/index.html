@@ -227,13 +227,13 @@
 
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=modular1"></script>
-  <script src="liftoff.js?v=liftoff49"></script>
+  <script src="liftoff.js?v=liftoff50"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "modular1";
     const PAD_VER = "pad5";
-    const APP_VER = "liftoff49";
+    const APP_VER = "liftoff50";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -327,23 +327,32 @@
       if (!hCache.has(key)) hCache.set(key, MB.composeStack(KIT.pieces, KIT.metas, idsOf(b), sidesOf(b)).height);
       return hCache.get(key);
     }
+    // Disallowed reasons: plain one-liner for the UI, kit/check_pair text kept for console/debug.
+    const R = (plain, tech) => ({ plain, tech: tech || plain });
     function pairWhy(top, bot) {
       const r = MB.checkPair(M()[top], M()[bot]);
       if (r[0]) return null;
-      return KIT.disallowed[top + "|" + bot] || r[1];
+      const tech = KIT.disallowed[top + "|" + bot] || r[1];
+      const t = M()[top], b = M()[bot];
+      let plain;
+      if (b.selfTopped || (t.type === "payload" && b.fairingIncompatible)) plain = `${b.label} has its own nose — nothing goes on top`;
+      else if (/overhangs/.test(r[1])) plain = `Too wide for ${b.label}`;
+      else if (/width step/.test(r[1])) plain = t.joinBottomWidth < b.joinTopWidth ? `Too narrow for ${b.label}` : `Too wide for ${b.label}`;
+      else plain = `Doesn't fit on ${b.label}`;
+      return R(plain, tech);
     }
     function budgetFor() { const cfg = padCfg(TODS[state.todIndex].id); return cfg.sitY - TIP_MIN_Y; }
     /** partial validity: pairs + strap-ons + height budget (with feasible completion) */
     function validate(b, depth) {
-      if (b.upper && !b.s1) return "pick a first stage first";
-      if (b.payload && !b.upper) return "pick an upper stage first";
+      if (b.upper && !b.s1) return R("Pick a first stage first");
+      if (b.payload && !b.upper) return R("Pick an upper stage first");
       if (b.s1 && b.upper) { const w = pairWhy(b.upper, b.s1); if (w) return w; }
       if (b.upper && b.payload) { const w = pairWhy(b.payload, b.upper); if (w) return w; }
-      if (b.sides && b.s1 && M()[b.s1].strapOns) return `${b.s1} already carries native strap-ons; use its -bare variant`;
+      if (b.sides && b.s1 && M()[b.s1].strapOns) return R(`${M()[b.s1].label} already has strap-on boosters`, `${b.s1} already carries native strap-ons; use its -bare variant`);
       if (b.s1) {
         const H = stackHeight(b), maxH = budgetFor();
-        if (H > maxH) return `too tall for this pad: ${H}px stack puts the tip at y=${padCfg(TODS[state.todIndex].id).sitY - H} (budget y\u2265${TIP_MIN_Y})`;
-        if (!depth && !isComplete(b) && !canComplete(b)) return `no upper/payload fits the y\u2265${TIP_MIN_Y} height budget on this pad`;
+        if (H > maxH) return R("Too tall for this pad", `stack ${H}px puts the tip at y=${padCfg(TODS[state.todIndex].id).sitY - H} (budget y>=${TIP_MIN_Y})`);
+        if (!depth && !isComplete(b) && !canComplete(b)) return R("Nothing fits on top on this pad", `no upper/payload fits the y>=${TIP_MIN_Y} height budget`);
       }
       return null;
     }
@@ -367,12 +376,12 @@
     }
     function evalCandidate(slot, id) {
       const b = state.build;
-      if (slot === "upper" && !b.s1) return "pick a first stage first";
+      if (slot === "upper" && !b.s1) return R("Pick a first stage first");
       if (slot === "payload") {
-        if (!b.upper) return "pick an upper stage first";
-        if (M()[b.upper].selfTopped) return pairWhy(id, b.upper) || `${b.upper} ends the stack`;
+        if (!b.upper) return R("Pick an upper stage first");
+        if (M()[b.upper].selfTopped) return pairWhy(id, b.upper) || R(`${M()[b.upper].label} has its own nose \u2014 nothing goes on top`);
       }
-      if (slot === "sides" && !b.s1) return "pick a first stage first";
+      if (slot === "sides" && !b.s1) return R("Pick a first stage first");
       if (slot === "sides" && id === "__none") return null;
       return validate(applyPick(b, slot, id), 0);
     }
@@ -403,15 +412,16 @@
       const parts = idsOf(b).map(lbl);
       let s = parts.join(" + ") + (b.sides ? " + side boosters" : "");
       const H = stackHeight(b), sit = padCfg(TODS[state.todIndex].id).sitY;
-      s += ` \u00b7 ${H}px, tip y=${sit - H}`;
+      void H; void sit;
       if (!isComplete(b)) s += b.upper ? " \u00b7 add a payload" : " \u00b7 add an upper stage";
+      else s += " \u00b7 ready to launch";
       return s;
     }
 
     function pick(slot, id) {
       if (state.phase !== "assemble" || !KIT) return;
       const why = evalCandidate(slot, id);
-      if (why) { setReason("\u2715 " + prettyReason(why), "warn"); return false; }
+      if (why) { console.debug("[modular] disallowed", slot, id, why.tech); setReason("\u2715 " + why.plain, "warn"); return false; }
       if (isSelected(slot, id) && state.swapSlot !== slot) { state.step = nextStep(state.build, slot); state.swapSlot = null; renderBuilder(); return true; }
       const prev = state.build;
       const nb = applyPick(prev, slot, id);

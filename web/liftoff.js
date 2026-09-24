@@ -7,17 +7,17 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "liftoff49";
+  const BUILD = "liftoff50";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
   const EXIT_DUR = 1.5;    // camera eases off, rocket exits top — flight ends on the flight
   const CLIMB_A = 140;
   const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
-  const ZOOM_LAND_FLOOR = 0.56; // adaptive landscape zoom never goes below this
+  const ZOOM_LAND_FLOOR = 0.72; // landscape zoom floor (CoE: ~0.72-0.75)
   const PLUME_MIN_CSS = 170;  // landscape follow: keep >=150 px of plume on screen below the nozzle
   const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow
-  const NOSE_FRAC_LAND = 0.055; // landscape: nose ~5.5% below the top edge
+  const NOSE_FRAC_LAND = 0.05; // landscape: nose ~5% below the top edge
   const HULL_K = 1.3;         // flame sizing: modular core bottom width -> hull (fin-span) equivalent     // native px / s² (t² climb)
   const BUF_DIV = 2; // smoke/glow cells = 2 CSS px max (no mosaic)
 
@@ -127,6 +127,7 @@
   };
 
   LiftoffEngine.prototype.reset = function () {
+    this._zoomS = 1;
     this._altBlendT0 = null; this._altBlendU = 0;
     this.stop();
     this.phase = "idle";
@@ -315,6 +316,56 @@
           bd[di] = (refR[k0] * (1 - t) + refR[k1] * t) | 0;
           bd[di + 1] = (refG[k0] * (1 - t) + refG[k1] * t) | 0;
           bd[di + 2] = (refB[k0] * (1 - t) + refB[k1] * t) | 0;
+        }
+      }
+    }
+
+    // Dusk/night: the tower mast can reach the plate top (03). Grey/tan structure is low-chroma
+    // against the saturated painted sky -> mask it (dilated) and fill from per-row block medians
+    // of the unmasked sky, so the extension never repeats a floating mast. Skipped when the
+    // mask would cover a large share of the band (e.g. desaturated night skies).
+    if (bandData && pal.parallax !== "day") {
+      const bd = bandData, BLK = 48, nb = Math.ceil(nw / BLK);
+      const m0 = new Uint8Array(nw * N);
+      let cnt = 0;
+      for (let i = 0, p = 0; p < nw * N; p++, i += 4) {
+        const r = bd[i], g = bd[i + 1], b = bd[i + 2];
+        if (Math.max(r, g, b) - Math.min(r, g, b) < 22) { m0[p] = 1; cnt++; }
+      }
+      if (cnt > 0 && cnt < nw * N * 0.03) {
+        const m = new Uint8Array(nw * N);
+        for (let y = 0; y < N; y++) for (let x = 0; x < nw; x++) if (m0[y * nw + x]) {
+          for (let dy = -3; dy <= 3; dy++) { const yy = y + dy; if (yy < 0 || yy >= N) continue;
+            for (let dx = -4; dx <= 4; dx++) { const xx = x + dx; if (xx >= 0 && xx < nw) m[yy * nw + xx] = 1; } }
+        }
+        const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+        const rR = new Float32Array(nb), rG = new Float32Array(nb), rB = new Float32Array(nb), ok = new Uint8Array(nb);
+        for (let y = 0; y < N; y++) {
+          const r0 = y * nw;
+          let any = false;
+          for (let x = 0; x < nw; x++) if (m[r0 + x]) { any = true; break; }
+          if (!any) continue;
+          for (let k = 0; k < nb; k++) {
+            const R = [], G = [], B = [];
+            for (let x = k * BLK; x < Math.min(nw, (k + 1) * BLK); x++) if (!m[r0 + x]) {
+              const i = (r0 + x) * 4; R.push(bd[i]); G.push(bd[i + 1]); B.push(bd[i + 2]);
+            }
+            ok[k] = R.length >= 8 ? 1 : 0;
+            if (ok[k]) { rR[k] = med(R); rG[k] = med(G); rB[k] = med(B); }
+          }
+          for (let k = 0; k < nb; k++) if (!ok[k]) {
+            let j = 1; while (j < nb && !(k - j >= 0 && ok[k - j]) && !(k + j < nb && ok[k + j])) j++;
+            const sk = (k - j >= 0 && ok[k - j]) ? k - j : (k + j < nb && ok[k + j] ? k + j : -1);
+            if (sk >= 0) { rR[k] = rR[sk]; rG[k] = rG[sk]; rB[k] = rB[sk]; }
+          }
+          for (let x = 0; x < nw; x++) {
+            if (!m[r0 + x]) continue;
+            const fb = x / BLK - 0.5, k0 = Math.max(0, Math.min(nb - 1, Math.floor(fb))), k1 = Math.min(nb - 1, k0 + 1);
+            const t = Math.max(0, Math.min(1, fb - k0)), di = (r0 + x) * 4;
+            bd[di] = (rR[k0] * (1 - t) + rR[k1] * t) | 0;
+            bd[di + 1] = (rG[k0] * (1 - t) + rG[k1] * t) | 0;
+            bd[di + 2] = (rB[k0] * (1 - t) + rB[k1] * t) | 0;
+          }
         }
       }
     }
@@ -1458,7 +1509,7 @@
     const rows = Math.min(fh, visRows, Math.ceil(lenCss * 1.2));
     // long landscape plume: slower cooling so the narrow modular hull still burns the full length
     const cool = lenBase > hullW * lenRatio + 1 ? clamp((hullW * lenRatio * 0.5) / lenBase, 0.15, 1) : 1;
-    this._tickFire(field, { seedHalf: cool < 1 ? Math.round(seedHalf * 1.4) : seedHalf, heat: 36, len: lenCss, rows: rows, expand: 1, cool: cool });
+    this._tickFire(field, { seedHalf: cool < 1 ? Math.round(seedHalf * 1.1) : seedHalf, heat: cool < 1 ? 40 : 36, len: lenCss, rows: rows, expand: 1, cool: cool });
     this._paintFireBuf(field, pal);
     const ar = Math.max(1, field.activeRows || rows);
     try { global.__liftoffFlameDbg = { hullW: hullW, lenCss: lenCss, seedHalf: seedHalf, rows: ar, fw: fw, u: u }; } catch (_) {}
@@ -1471,7 +1522,7 @@
       const sc = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
       const cw0 = this.cssFromNative(nz.x + nozzles[ni], nz.y);
       const css = this._w2s(cw0.x, cw0.y);
-      ctx.globalAlpha = isSide ? 0.75 : 1;
+      ctx.globalAlpha = isSide ? 0.92 : 1;
       const x0c = css.x, y0c = Math.round(css.y);
       const BAND = 2;
       for (let y = 0; y < ar; y += BAND) {
@@ -1480,7 +1531,7 @@
         const dw = Math.round(field.w * sc * wsc);
         const bh = Math.min(BAND, ar - y);
         ctx.drawImage(field.canvas, 0, y, field.w, bh,
-          Math.round(x0c - dw / 2), y0c + Math.round(y * sc), dw, Math.max(1, Math.round(bh * sc)));
+          Math.round(x0c - dw / 2), y0c + Math.round(y * sc), dw, Math.max(1, Math.round((y + bh) * sc) - Math.round(y * sc)));
       }
     }
 
@@ -1668,7 +1719,7 @@
       for (let y = 0; y < H; y += band) {
         const aboveN = (lb.top - (y + band - cy) / zA) / scaleY; // extension row (native) at this screen row
         let rowA = smooth01(f0, f1, aboveN);
-        if (blendPlate) rowA *= tBlend;
+        if (blendPlate) rowA = Math.max(rowA * tBlend, smooth01(clean - 48, clean - 8, aboveN)); // repeat-row streaks never show
         if (rowA <= 0.003) continue;
         let col = mix3(upA, loA, y / H);
         if (blendPlate) {
@@ -1677,11 +1728,15 @@
           // screen (no inverted band above the seam); everything darkens with altitude (k).
           const sc = this._skyCol || this._skyRows;
           const seamY = zA * lb.top + cy;
-          const warm = smooth01(H * 0.7, H * 1.3, seamY);
-          const rMax = (sc.length - 1) * 0.78 * (1 - 0.8 * k);
-          const ri = Math.round(warm * rMax * Math.pow(clamp(y / H, 0, 1), 1.4));
+          const warm = smooth01(H * 0.5, H * 1.1, seamY);
+          // warm magenta/orange glow hugs the bottom of the frame and fades slowly (k^2), while
+          // the upper frame deepens first -> painterly, not a flat wash
+          const yy = clamp(y / H, 0, 1);
+          const rMax = (sc.length - 1) * 0.95 * (1 - 0.6 * k * k);
+          const ri = Math.round(warm * rMax * Math.pow(yy, 1.25));
           const pc = sc[Math.max(0, Math.min(sc.length - 1, ri))];
-          col = mix3(pc, mix3(upA, loA, y / H), k);
+          const kRow = clamp(k * (1.2 - 0.95 * yy * yy), 0, 1);
+          col = mix3(pc, mix3(upA, loA, yy), kRow);
         }
         g.globalAlpha = rowA;
         g.fillStyle = rgbaStr(col, 1);
@@ -1800,8 +1855,26 @@
       // the bottom. Landscape can't fit stack + plume -> gentle zoom-out eased over ~1 s
       // after pickup (smoothstep: zero slope at both ends -> no jerk).
       const zoomU = this._pickupT >= 0 ? smooth01(0, 1.0, this.climbT - this._pickupT) : 0;
-      const zT = landscape ? (this._zoomLand || ZOOM_LAND_MIN) : 1;
-      z = 1 - (1 - zT) * zoomU;
+      // Landscape zoom (v49b): stay at 1.0 while ANY plate / clean-extension pixel can be on
+      // screen. Zoom-out is bounded so the opaque altitude-sky line (extension row f1 above the
+      // plate top) stays below the bottom edge: z >= (H + M - tgt) / D, D = nose -> opaque line.
+      // On 03 also wait for the 1.5 s sky cross-fade to finish. Smoothed (never below bound).
+      let zAllowed = 1;
+      if (landscape) {
+        const clean = this._tallSkyClean || 256;
+        const opaqueLocal = lb.top - (clean * 0.5 + 6) * scaleY;
+        const D = opaqueLocal - noseLocal;
+        const tgtL = wrapH * NOSE_FRAC_LAND;
+        const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
+        if (D > 1 && blendOk) zAllowed = clamp((wrapH + 24 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
+      }
+      {
+        const zPrev = this._zoomS || 1;
+        const kz = 1 - Math.exp(-(this._lastDt || 1 / 60) * 2.2);
+        let zs = zAllowed >= zPrev ? zAllowed : zPrev + (zAllowed - zPrev) * kz;
+        this._zoomS = zs;
+        z = zs;
+      }
       const noseTarget = wrapH * (landscape ? NOSE_FRAC_LAND : NOSE_FRAC);
       // never push the camera during the hold: start from the seated nose, glide to 10%
       // C1 soft pickup of width 2*Wp that converges EXACTLY on tgt; starts when the nose is
@@ -1813,7 +1886,6 @@
       T = d <= -Wp ? 0 : (d < Wp ? ((d + Wp) * (d + Wp)) / (4 * Wp) : d);
       if (this._pickupT < 0 && T > 0.25) this._pickupT = this.climbT;
       // never expose below the plate bottom while zoomed out
-      if (z < 1) z = Math.max(z, Math.min(1, (wrapH - T) / plateBottom));
     } else {
       T = 0; z = 1;
     }
