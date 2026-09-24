@@ -8,7 +8,7 @@
 
   const POOL_GROUND = 420;
   const POOL_TRAIL = 280;
-  const BUF_DIV = 2; // low-res buffer → crisp upscale
+  const BUF_DIV = 2.5; // ~display/2.5 nearest upscale
 
   const TOD_GLOW = {
     "02": {
@@ -129,6 +129,7 @@
       sky.style.opacity = "0";
       sky.style.background = "transparent";
       sky.innerHTML = "";
+      sky._skyCanvas = null;
     }
     const cd = this.getCountdownEl();
     if (cd) { cd.style.display = "none"; cd.textContent = ""; }
@@ -138,7 +139,14 @@
       fx.style.transform = "";
     }
     const plateEl = this.getPlateEl && this.getPlateEl();
-    if (plateEl) { plateEl.style.webkitMaskImage = ""; plateEl.style.maskImage = ""; }
+    if (plateEl) {
+      plateEl.style.opacity = "1";
+      plateEl.style.webkitMaskImage = "";
+      plateEl.style.maskImage = "";
+    }
+    if (this._tallSkyCanvas) {
+      this._tallSkyCanvas.style.display = "none";
+    }
     const px = this.getParallaxEl();
     if (px) { px.style.display = "none"; }
     this.stopAudio(true);
@@ -150,67 +158,261 @@
     this.raf = 0;
   };
 
-  /* ---------- plate top sample + seamless sky tile ---------- */
-  LiftoffEngine.prototype.buildSkyTile = function () {
+  /* ---------- tall seamless sky (plate + soft palette continuation) ---------- */
+  LiftoffEngine.prototype.buildTallSky = function () {
     const plate = this.getPlateEl();
     const tod = this.getTodId();
     const pal = TOD_GLOW[tod] || TOD_GLOW["05"];
-    const bandH = 100;
-    const w = 256;
-    const tileH = 512;
+    if (!plate || !plate.naturalWidth) return null;
+    const nw = plate.naturalWidth;
+    const nh = plate.naturalHeight;
+    const N = 80;
+    const BLEND = 96;
+    const ext = Math.round(nh * 2.2);
     const c = document.createElement("canvas");
-    c.width = w;
-    c.height = tileH;
-    const ctx = c.getContext("2d");
+    c.width = nw;
+    c.height = nh + ext;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
     ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(plate, 0, ext);
 
-    if (plate && plate.naturalWidth) {
-      try {
-        // Sample top band of plate
-        // Prefer a band slightly below absolute top (richer stars/nebula), then tile
-        const srcY0 = Math.min(40, Math.max(0, plate.naturalHeight - bandH - 20));
-        const srcH = Math.min(bandH, plate.naturalHeight - srcY0);
-        ctx.drawImage(plate, 0, srcY0, plate.naturalWidth, srcH, 0, 0, w, bandH);
-        // Mirror / tile upward
-        for (let y = bandH; y < tileH; y += bandH) {
-          const flip = ((y / bandH) | 0) % 2 === 1;
-          if (flip) {
-            ctx.save();
-            ctx.translate(0, y + bandH);
-            ctx.scale(1, -1);
-            ctx.drawImage(c, 0, 0, w, bandH, 0, 0, w, bandH);
-            ctx.restore();
-          } else {
-            ctx.drawImage(c, 0, 0, w, bandH, 0, y, w, bandH);
-          }
-        }
-        // Soft vertical blend into deep space over 40+ px near top of tile
-        // and grade the whole extension toward deep
-        // Soft 48px+ crossfade at each tile junction
-        for (let y = bandH - 48; y < bandH + 8; y++) {
-          const t = clamp((y - (bandH - 48)) / 48, 0, 1);
-          ctx.globalAlpha = t * 0.15;
-          ctx.fillStyle = pal.topHint;
-          ctx.fillRect(0, y, w, 1);
-        }
-        ctx.globalAlpha = 1;
-        const grad = ctx.createLinearGradient(0, bandH, 0, tileH);
-        grad.addColorStop(0, "rgba(0,0,0,0)");
-        grad.addColorStop(0.25, this._rgba(pal.deep, 0.15));
-        grad.addColorStop(0.6, this._rgba(pal.deep, 0.45));
-        grad.addColorStop(1, this._rgba(pal.deep, 0.95));
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, bandH, w, tileH - bandH);
-      } catch (_) {
-        ctx.fillStyle = pal.topHint;
-        ctx.fillRect(0, 0, w, tileH);
+    const band = document.createElement("canvas");
+    band.width = nw; band.height = N;
+    const bctx = band.getContext("2d", { willReadFrequently: true });
+    bctx.imageSmoothingEnabled = false;
+    bctx.drawImage(plate, 0, 0, nw, N, 0, 0, nw, N);
+    let bandData = null;
+    try { bandData = bctx.getImageData(0, 0, nw, N).data; } catch (_) {}
+
+    this._cloudPalette = [[232, 238, 244], [210, 220, 230], [245, 248, 252]];
+    if (bandData) {
+      const clouds = [];
+      for (let i = 0; i < bandData.length; i += 32) {
+        const r = bandData[i], g = bandData[i+1], b = bandData[i+2], a = bandData[i+3];
+        if (a > 200 && r > 170 && g > 180 && b > 190 && r+g+b > 560) clouds.push([r,g,b]);
       }
-    } else {
-      ctx.fillStyle = pal.topHint;
-      ctx.fillRect(0, 0, w, tileH);
+      if (clouds.length) this._cloudPalette = clouds;
     }
-    this._skyTile = c;
+
+    const colR = new Float32Array(nw);
+    const colG = new Float32Array(nw);
+    const colB = new Float32Array(nw);
+    if (bandData) {
+      const rows = Math.min(24, N);
+      for (let x = 0; x < nw; x++) {
+        let r=0,g=0,b=0,n=0;
+        for (let y = 0; y < rows; y++) {
+          const i = (y * nw + x) * 4;
+          r += bandData[i]; g += bandData[i+1]; b += bandData[i+2]; n++;
+        }
+        colR[x]=r/n; colG[x]=g/n; colB[x]=b/n;
+      }
+      const tmpR=colR.slice(), tmpG=colG.slice(), tmpB=colB.slice();
+      for (let x = 0; x < nw; x++) {
+        let r=0,g=0,b=0,w=0;
+        for (let dx=-8; dx<=8; dx++) {
+          const xx=Math.max(0,Math.min(nw-1,x+dx));
+          const ww=1-Math.abs(dx)/9;
+          r+=tmpR[xx]*ww; g+=tmpG[xx]*ww; b+=tmpB[xx]*ww; w+=ww;
+        }
+        colR[x]=r/w; colG[x]=g/w; colB[x]=b/w;
+      }
+    }
+
+    function parseDeep(c) {
+      if (c && c[0]==="#") {
+        const h=c.slice(1);
+        if (h.length===3) return [parseInt(h[0]+h[0],16),parseInt(h[1]+h[1],16),parseInt(h[2]+h[2],16)];
+        return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+      }
+      return [6,10,22];
+    }
+    const deep = parseDeep(pal.deep);
+
+    const img = ctx.createImageData(nw, ext);
+    const d = img.data;
+    for (let y = 0; y < ext; y++) {
+      const above = ext - 1 - y;
+      const t = clamp(above / (ext * 0.85), 0, 1);
+      const deepW = t < 0.4 ? 0 : (0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.pow((t - 0.4) / 0.6, 1.2))));
+      const juncW = above < BLEND ? (0.5 + 0.5 * Math.cos(Math.PI * (above / BLEND))) : 0;
+      for (let x = 0; x < nw; x++) {
+        const i = (y * nw + x) * 4;
+        // Mild spatial noise (not per-column streaks)
+        const n = (((x * 13 + y * 7) % 9) - 4) * 0.6;
+        let r = (colR[x] || deep[0]) + n;
+        let g = (colG[x] || deep[1]) + n;
+        let b = (colB[x] || deep[2]) + n;
+        if (bandData && juncW > 0.01) {
+          const srcY = Math.min(N - 1, above);
+          const si = (srcY * nw + x) * 4;
+          r = r * (1 - juncW) + bandData[si] * juncW;
+          g = g * (1 - juncW) + bandData[si+1] * juncW;
+          b = b * (1 - juncW) + bandData[si+2] * juncW;
+        }
+        r = r * (1 - deepW) + deep[0] * deepW;
+        g = g * (1 - deepW) + deep[1] * deepW;
+        b = b * (1 - deepW) + deep[2] * deepW;
+        d[i]=r|0; d[i+1]=g|0; d[i+2]=b|0; d[i+3]=255;
+      }
+    }
+    if (pal.parallax === "night" || pal.parallax === "dusk" || pal.parallax === "dawn") {
+      for (let i = 0; i < 260; i++) {
+        const x = (this._rand() * nw) | 0;
+        const y = (this._rand() * Math.max(1, ext - BLEND - 20)) | 0;
+        const di = (y * nw + x) * 4;
+        const a = 0.4 + this._rand() * 0.6;
+        d[di] = Math.min(255, d[di] + ((200 * a)|0));
+        d[di+1] = Math.min(255, d[di+1] + ((220 * a)|0));
+        d[di+2] = Math.min(255, d[di+2] + ((255 * a)|0));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    // Exact plate-top copy for first BLEND rows above junction (bit-identical → no seam)
+    if (bandData) {
+      const jimg = ctx.getImageData(0, ext - BLEND, nw, BLEND);
+      const jd = jimg.data;
+      for (let above = 0; above < BLEND; above++) {
+        const srcY = Math.min(N - 1, above);
+        const y = BLEND - 1 - above; // in jimg: 0 = farthest from plate, BLEND-1 = junction
+        // Actually jimg row 0 is canvas y=(ext-BLEND), which is BLEND px above junction
+        // canvas y = ext-1-above for "above" distance from plate
+        // We want canvas rows [ext-BLEND .. ext-1] = plate rows [BLEND-1 .. 0] mirrored softly
+        // Bit-identical: canvas y=(ext-1-k) = plate row k for k in 0..BLEND-1
+      }
+      for (let k = 0; k < BLEND; k++) {
+        const canvasY = ext - 1 - k; // k=0 junction-adjacent
+        const srcY = Math.min(N - 1, k);
+        const row = canvasY - (ext - BLEND); // index in jimg
+        for (let x = 0; x < nw; x++) {
+          const di = (row * nw + x) * 4;
+          const si = (srcY * nw + x) * 4;
+          // Ease from exact plate (k=0) toward already-filled soft color (k→BLEND)
+          const w = 0.5 + 0.5 * Math.cos(Math.PI * (k / BLEND)); // 1 at junction → 0 at BLEND
+          jd[di] = (jd[di] * (1 - w) + bandData[si] * w) | 0;
+          jd[di+1] = (jd[di+1] * (1 - w) + bandData[si+1] * w) | 0;
+          jd[di+2] = (jd[di+2] * (1 - w) + bandData[si+2] * w) | 0;
+          jd[di+3] = 255;
+        }
+      }
+      ctx.putImageData(jimg, 0, ext - BLEND);
+    }
+
+    this._tallSky = c;
+    this._tallSkyExt = ext;
+    this._tallSkyNh = nh;
+    this._tallSkyNw = nw;
     return c;
+  };
+
+  LiftoffEngine.prototype.drawTallSky = function () {
+    const tall = this._tallSky;
+    const lb = this._lb;
+    if (!tall || !lb) return;
+
+    // Mount FIXED on #stage (not inside #world) — pan via source-rect so no top gap/seam
+    const stage = document.getElementById("stage") || (this.getSkyEl && this.getSkyEl());
+    if (!stage) return;
+
+    let canvas = this._tallSkyCanvas;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.id = "tallSky";
+      canvas.setAttribute("aria-hidden", "true");
+      canvas.style.position = "absolute";
+      canvas.style.pointerEvents = "none";
+      canvas.style.imageRendering = "pixelated";
+      canvas.style.zIndex = "0";
+      // Behind world (world is z-index 1)
+      const world = this.getWorldEl && this.getWorldEl();
+      if (world && world.parentElement === stage) stage.insertBefore(canvas, world);
+      else stage.insertBefore(canvas, stage.firstChild);
+      this._tallSkyCanvas = canvas;
+    }
+
+    const dpr = this._dpr || 1;
+    const cw = Math.max(1, Math.round(this._wrapW * dpr));
+    const ch = Math.max(1, Math.round(this._wrapH * dpr));
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+    canvas.style.left = "0px";
+    canvas.style.top = "0px";
+    canvas.style.width = this._wrapW + "px";
+    canvas.style.height = this._wrapH + "px";
+    canvas.style.display = "block";
+
+    // Source-rect slides with camera. Viewport shows the same cover window as plateMap.
+    // Plate sits at tallY=[ext .. ext+nh). Viewport top in plate-space is -lb.top (css).
+    const ext = this._tallSkyExt;
+    const nh = this._tallSkyNh;
+    const nw = this._tallSkyNw;
+    const scaleY = lb.nh / lb.height;
+    const scaleX = nw / lb.width;
+    // Plate-local css Y of viewport top, then +camY (world moved down ⇒ look higher on plate)
+    const viewTopPlateCss = -lb.top - (this.camY || 0);
+    let srcY = ext + viewTopPlateCss * scaleY;
+    const srcH = this._wrapH * scaleY;
+    const viewLeftPlateCss = -lb.left;
+    let srcX = viewLeftPlateCss * scaleX;
+    const srcW = this._wrapW * scaleX;
+    if (srcX < 0) srcX = 0;
+    if (srcX + srcW > nw) srcX = Math.max(0, nw - srcW);
+
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    // Deep fill first — if source runs past top of tall sky, no black/streak gap
+    const pal = TOD_GLOW[this.getTodId()] || TOD_GLOW["05"];
+    ctx.fillStyle = pal.deep || "#050814";
+    ctx.fillRect(0, 0, cw, ch);
+
+    if (srcY + srcH <= 0) {
+      // fully above tall sky — deep fill only
+    } else {
+      let dy = 0;
+      let sy = srcY;
+      let sh = srcH;
+      if (sy < 0) {
+        const skip = -sy;
+        dy = (skip / srcH) * ch;
+        sh = srcH - skip;
+        sy = 0;
+      }
+      if (sy + sh > tall.height) sh = tall.height - sy;
+      if (sh > 0) {
+        const dh = (sh / srcH) * ch;
+        ctx.drawImage(tall, srcX, sy, srcW, sh, 0, dy, cw, dh);
+      }
+    }
+
+    const plate = this.getPlateEl && this.getPlateEl();
+    if (plate) {
+      plate.style.opacity = "0";
+      plate.style.webkitMaskImage = "";
+      plate.style.maskImage = "";
+    }
+    const sky = this.getSkyEl && this.getSkyEl();
+    if (sky) { sky.style.opacity = "0"; sky.innerHTML = ""; sky._skyCanvas = null; }
+
+    // Hide parallax — tall sky owns backdrop; parallax was a second seam source
+    const px = this.getParallaxEl && this.getParallaxEl();
+    if (px) { px.style.display = "none"; }
+  };
+
+  LiftoffEngine.prototype.updateTallSkyPan = function () {
+    // Re-blit sliding source-rect each frame during climb
+    if (!this._tallSky || !this._tallSkyCanvas || !this._lb) return;
+    this.drawTallSky();
+  };
+
+  LiftoffEngine.prototype.clearTallSky = function () {
+    if (this._tallSkyCanvas) {
+      this._tallSkyCanvas.style.display = "none";
+    }
+    const plate = this.getPlateEl && this.getPlateEl();
+    if (plate) plate.style.opacity = "1";
   };
 
   LiftoffEngine.prototype._rgba = function (c, a) {
@@ -265,13 +467,17 @@
     }
     if (mode === "day" || mode === "dawn" || mode === "dusk") {
       this._clouds = [];
-      for (let i = 0; i < 10; i++) {
+      const palC = this._cloudPalette || [[232, 238, 244], [210, 220, 230], [245, 248, 252]];
+      for (let i = 0; i < 8; i++) {
+        const col = palC[(this._rand() * palC.length) | 0];
         this._clouds.push({
           x: this._rand() * w,
-          y: this._rand() * h * 0.7,
-          w: 18 + this._rand() * 40,
-          h: 8 + this._rand() * 16,
-          a: 0.25 + this._rand() * 0.35,
+          y: this._rand() * h * 0.65,
+          w: 22 + this._rand() * 48,
+          h: 10 + this._rand() * 18,
+          a: 0.22 + this._rand() * 0.3,
+          r: col[0], g: col[1], b: col[2],
+          blobs: 3 + ((this._rand() * 3) | 0),
         });
       }
     }
@@ -326,9 +532,9 @@
     this._bufH = bufH;
     this._bScale = bufW / wrapW; // css → buf
 
-    this.buildSkyTile();
+    this.buildTallSky();
     this.buildParallax();
-    this.applySkyExtension(0);
+    this.drawTallSky();
 
     const px = this.getParallaxEl();
     if (px) {
@@ -343,23 +549,6 @@
     return true;
   };
 
-  LiftoffEngine.prototype.applySkyExtension = function (fade) {
-    const sky = this.getSkyEl();
-    if (!sky || !this._skyTile) return;
-    const tod = this.getTodId();
-    const pal = TOD_GLOW[tod] || TOD_GLOW["05"];
-    sky.style.opacity = "1";
-    sky.style.top = "-180%";
-    sky.style.bottom = "-40%";
-    // Place tiled sample as background, with deep fade
-    const url = this._skyTile.toDataURL();
-    const deep = this._mix(pal.topHint, pal.deep, 0.55 + fade * 0.4);
-    // Tile dominates; only late altitude washes toward deep — kills hard black void
-    const wash = clamp(0.1 + fade * 0.55, 0, 0.7);
-    sky.style.background =
-      "linear-gradient(to bottom, transparent 0%, transparent 50%, " + this._rgba(deep, wash) + " 100%)," +
-      "url(" + url + ") center top / 100% auto repeat-y";
-  };
 
   /* ---------- audio (unchanged light path) ---------- */
   LiftoffEngine.prototype.ensureAudio = function () {
@@ -684,97 +873,143 @@
 
     this.drawPadGlow(bctx, seat, pal);
     this.drawSmoke(bctx, seat, pal);
-    if (this.ignited && this.phase !== "linger") {
-      this.drawFlameBuffered(bctx, seat, pal);
-    }
 
-    // Upscale smoke/glow/flame crisp
+    // Upscale smoke/glow only
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, this._wrapW, this._wrapH);
     ctx.globalCompositeOperation = "source-over";
     ctx.drawImage(this._buf, 0, 0, this._bufW, this._bufH, 0, 0, this._wrapW, this._wrapH);
+
+    // Flame drawn crisp on display at 2px grid (avoids mosaic from buffer upscale)
+    if (this.ignited && this.phase !== "linger") {
+      this.drawFlameDisplay(ctx, seat, pal);
+    }
   };
 
-  LiftoffEngine.prototype.drawFlameBuffered = function (ctx, seat, pal) {
+  LiftoffEngine.prototype.drawFlameDisplay = function (ctx, seat, pal) {
+    // Rasterized tapered spine at 2px grid (solid fill, edge flicker only)
     const lb = this._lb;
     const nz = this.nozzleNative(seat);
     const nozzles = seat.nozzles && seat.nozzles.length ? seat.nozzles : [0];
     const stageW = Math.max(80, seat.width || 120);
+    const stackH = Math.max(stageW * 4, (seat.targetH || 420));
     const grow = clamp(this.flameIntensity, 0.25, 1.5);
-    const baseW = stageW * (1.8 + 0.35 * grow);
     let lenN;
-    if (this.phase === "climb") lenN = stageW * (3.5 + grow * 3.2 + this.climbT * 2.2);
-    else if (this.phase === "hold") lenN = stageW * (2.0 + grow * 1.1);
-    else lenN = stageW * (1.6 + grow * 1.3);
-    const flickL = 0.8 + 0.2 * Math.sin(this._simTime * 55) + (this._rand() - 0.5) * 0.15;
-    const flickW = 0.88 + 0.12 * Math.sin(this._simTime * 41) + (this._rand() - 0.5) * 0.12;
-    const cell = 1; // buffer px ≈ 2 CSS px after ×2 upscale
-    ctx.globalCompositeOperation = "lighter";
+    if (this.phase === "climb") lenN = stackH * (3.0 + grow * 0.5 + Math.min(1.2, this.climbT) * 0.4);
+    else if (this.phase === "hold") lenN = stackH * (1.5 + grow * 0.35);
+    else lenN = stackH * (0.9 + grow * 0.35);
+    const flickL = 1 + (this._rand() - 0.5) * 0.24;
+    const flickW = 1 + (this._rand() - 0.5) * 0.16;
+    const baseWN = stageW * (1.75 + 0.3 * grow) * flickW;
+    const CELL = 1; // 1 CSS px grid — finer than mosaic blocks
 
-    for (let ni = 0; ni < nozzles.length; ni++) {
-      const isSide = nozzles.length > 1 && nozzles[ni] !== 0;
-      const sc = isSide ? 0.4 : 1;
-      const css = this.cssFromNative(nz.x + nozzles[ni], nz.y);
-      const bs = this._bScale;
-      const cols = Math.max(5, Math.round(baseW * flickW * sc / lb.nw * lb.width * bs / cell));
-      const rows = Math.max(16, Math.round(lenN * flickL * sc / lb.nh * lb.height * bs / cell));
-      const ox = Math.round(css.x * bs);
-      const oy = Math.round(css.y * bs);
+    const heat = pal.flame || ["#ffffff", "#fff078", "#ffaa28", "#ff4a14", "#c01e55"];
 
+    const stamp = (ox, oy, lenCss, baseWCss, ang, alphaScale) => {
+      const cosA = Math.cos(ang), sinA = Math.sin(ang);
+      const rows = Math.max(8, Math.round(lenCss / CELL));
+      const baseHalf = Math.max(CELL, baseWCss / 2);
       for (let row = 0; row < rows; row++) {
-        const t = row / rows; // 0 at nozzle → 1 at tip
-        const taper = Math.pow(1 - t, 1.25);
-        const jitter = 0.75 + this._rand() * 0.5;
-        const rowW = Math.max(1, Math.round(cols * taper * jitter));
-        const y = oy + row * cell;
-        for (let c = 0; c < rowW; c++) {
-          const u = (c + 0.5) / rowW; // 0..1 across
-          const edge = Math.abs(u - 0.5) * 2; // 0 center → 1 edge
-          // skip edge speckles for flicker
-          if (edge > 0.7 && this._rand() < 0.4) continue;
-          if (this._rand() < 0.06) continue;
-          // heat: center+near nozzle hotter
-          const heat = (1 - t) * (1 - edge * 0.65) + this._rand() * 0.15;
+        const t = row / (rows - 1 || 1);
+        // Sharp taper to 1–2px tip
+        let half = baseHalf * Math.pow(1 - t, 1.05);
+        if (t > 0.92) half = Math.max(1, half);
+        half = Math.max(1, half);
+        const cx = ox + sinA * row * CELL;
+        const cy = oy + cosA * row * CELL;
+        const span = Math.max(1, Math.ceil(half / CELL));
+        for (let k = -span; k <= span; k++) {
+          const xOff = k * CELL;
+          const edge = span <= 0 ? 0 : Math.abs(k) / span;
+          // Core solid; sparse fringe missing only at outermost
+          if (edge > 0.9 && this._rand() < 0.35) continue;
           let ci;
-          if (heat > 0.75) ci = 0;
-          else if (heat > 0.5) ci = 1;
-          else if (heat > 0.28) ci = 2;
-          else if (heat > 0.12) ci = 3;
+          if (edge < 0.2) ci = 0;
+          else if (edge < 0.45) ci = 1;
+          else if (edge < 0.75) ci = 2;
+          else if (edge < 0.92) ci = 3;
           else ci = 4;
-          ctx.globalAlpha = grow * (0.55 + heat * 0.45) * (isSide ? 0.75 : 1) * (1 - t * 0.35);
-          ctx.fillStyle = pal.flame[Math.min(pal.flame.length - 1, ci)];
-          const x = ox - Math.floor(rowW * cell / 2) + c * cell;
-          ctx.fillRect(x, y, cell, cell);
+          if (t > 0.7 && ci < 3) ci++;
+          if (t > 0.88 && ci < 4) ci++;
+          const px = cx + cosA * xOff;
+          const py = cy - sinA * xOff;
+          ctx.globalAlpha = alphaScale * grow * (0.7 + (1 - t) * 0.3) * (1 - edge * 0.12);
+          ctx.fillStyle = heat[Math.min(4, ci)];
+          ctx.fillRect(Math.round(px / CELL) * CELL, Math.round(py / CELL) * CELL, CELL, CELL);
         }
       }
+    };
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = "lighter";
+    for (let ni = 0; ni < nozzles.length; ni++) {
+      const isSide = nozzles.length > 1 && nozzles[ni] !== 0;
+      const sc = isSide ? 0.38 : 1;
+      const css = this.cssFromNative(nz.x + nozzles[ni], nz.y);
+      let lenCss = (lenN * flickL * sc / lb.nh) * lb.height;
+      // Keep tip on-screen so taper reads (not a clipped wide rectangle)
+      const maxLen = Math.max(48, (this._wrapH || 390) - css.y - 6);
+      if (lenCss > maxLen) lenCss = maxLen;
+      const baseWCss = (baseWN * sc / lb.nw) * lb.width;
+      // Base width ≤ ~0.55 of length so silhouette is a clear taper
+      const maxBase = lenCss * 0.7;
+      const bw = Math.min(baseWCss, maxBase);
+      stamp(css.x, css.y, lenCss, bw, 0, isSide ? 0.65 : 1);
+      if (!isSide) {
+        stamp(css.x, css.y, lenCss * 0.62, bw * 0.38, (15 * Math.PI) / 180, 0.42);
+        stamp(css.x, css.y, lenCss * 0.62, bw * 0.38, (-15 * Math.PI) / 180, 0.42);
+      }
     }
+    if (this.phase === "climb" && this.climbT < 2.8) {
+      const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
+      const css = this.cssFromNative(nz.x, nz.y);
+      const padCssY = lb.top + (deckY / lb.nh) * lb.height;
+      const trailLen = Math.max(8, padCssY - css.y);
+      const fade = clamp(1 - this.climbT / 2.5, 0, 1);
+      if (fade > 0.05 && trailLen > 4) {
+        stamp(css.x, css.y, trailLen * 0.9, (stageW * 0.42 / lb.nw) * lb.width, 0, 0.35 * fade);
+      }
+    }
+    ctx.restore();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
   };
 
-  /* ---------- rocket light (additive orange on lower stack) ---------- */
   LiftoffEngine.prototype.applyRocketLight = function () {
     const stack = this.getStackEl();
     if (!stack || !this.ignited) {
-      if (stack) stack.style.filter = "";
+      if (stack) {
+        stack.style.filter = "";
+        if (stack._lightCanvas) { stack._lightCanvas.style.display = "none"; }
+      }
       return;
     }
-    const flick = 0.7 + 0.3 * Math.sin(this._simTime * 42);
-    const str = clamp(this.flameIntensity * flick + this.releaseFlash * 1.2, 0, 1.8);
-    // CSS approximation: drop-shadow glow under stack (true source-atop tint is heavier)
-    const a = (0.25 + str * 0.55).toFixed(2);
-    const y = Math.round(4 + str * 10);
-    // Tight under-glow only — avoid huge soft rectangle behind stack
-    const bloom = Math.round(3 + str * 6);
+    // Hide any prior overlay canvas (source-atop overlay caused stack holes)
+    if (stack._lightCanvas) stack._lightCanvas.style.display = "none";
+
+    const flick = 0.72 + 0.28 * Math.sin(this._simTime * 42) + (this._rand() - 0.5) * 0.06;
+    const str = clamp(this.flameIntensity * flick + this.releaseFlash * 1.15, 0, 1.8);
+    const bloom = Math.round(2 + str * 4);
+    const y = Math.round(2 + str * 7);
+    // Tight under-glow + slight brightness to suggest lower-stack heat without overlay
     stack.style.filter =
-      "drop-shadow(0 " + Math.max(2, y) + "px " + bloom + "px rgba(255,130,25," + (0.2 + str * 0.35).toFixed(2) + "))";
+      "drop-shadow(0 " + y + "px " + bloom + "px rgba(255,120,20," + (0.22 + str * 0.38).toFixed(2) + "))" +
+      " drop-shadow(0 " + Math.round(y * 0.4) + "px 2px rgba(255,180,60," + (0.12 + str * 0.2).toFixed(2) + "))";
   };
 
   /* ---------- parallax ---------- */
   LiftoffEngine.prototype.drawParallax = function () {
     const px = this.getParallaxEl();
     if (!px || !this._fxReady) return;
+    // Soft stars only — no streak layers that read as a second sky seam
+    if (this.camY < 4) {
+      const ctx0 = px.getContext("2d");
+      ctx0.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+      ctx0.clearRect(0, 0, this._wrapW, this._wrapH);
+      return;
+    }
     const ctx = px.getContext("2d");
     const dpr = this._dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -797,11 +1032,8 @@
           const x = (s.x / 320) * this._wrapW;
           ctx.globalAlpha = s.a;
           ctx.fillStyle = "#e8f0ff";
-          if (streak > 1.2) {
-            ctx.fillRect(Math.round(x), Math.round(y), s.s, Math.round(streak * 2));
-          } else {
-            ctx.fillRect(Math.round(x), Math.round(y), s.s, s.s);
-          }
+          ctx.globalAlpha = s.a * 0.55;
+          ctx.fillRect(Math.round(x), Math.round(y), s.s, s.s);
         }
       }
     }
@@ -812,26 +1044,33 @@
         let y = (c.y / 640) * this._wrapH + scroll * speed;
         y = ((y % this._wrapH) + this._wrapH) % this._wrapH;
         const x = (c.x / 320) * this._wrapW;
-        const streak = vel * 1.5;
-        ctx.globalAlpha = c.a * (mode === "day" ? 0.7 : 0.45);
-        ctx.fillStyle = mode === "day" ? "#e8eef4" : "#d0b8a8";
+        const streak = vel * 1.2;
+        const r = c.r != null ? c.r : 232;
+        const g = c.g != null ? c.g : 238;
+        const b = c.b != null ? c.b : 244;
+        ctx.globalAlpha = c.a * (mode === "day" ? 0.75 : 0.45);
+        ctx.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
         const hw = (c.w / 320) * this._wrapW;
-        const hh = Math.max(2, (c.h / 640) * this._wrapH + streak);
-        // pixel cloud blob
-        ctx.fillRect(Math.round(x), Math.round(y), Math.round(hw * 0.6), Math.round(hh));
-        ctx.fillRect(Math.round(x + hw * 0.2), Math.round(y - hh * 0.4), Math.round(hw * 0.5), Math.round(hh));
-        ctx.fillRect(Math.round(x + hw * 0.4), Math.round(y), Math.round(hw * 0.45), Math.round(hh * 0.8));
+        const hh = Math.max(3, (c.h / 640) * this._wrapH + streak);
+        const blobs = c.blobs || 3;
+        for (let k = 0; k < blobs; k++) {
+          const ox = hw * (0.15 + k * 0.22);
+          const oy = hh * ((k % 2) * -0.25);
+          const rw = hw * (0.35 + (k % 3) * 0.08);
+          const rh = hh * (0.7 + (k % 2) * 0.2);
+          // Soft pixel ellipse via scanlines
+          const rx = Math.max(2, rw / 2), ry = Math.max(1, rh / 2);
+          for (let dy = -ry; dy <= ry; dy++) {
+            const t = 1 - (dy * dy) / (ry * ry);
+            if (t <= 0) continue;
+            const span = Math.sqrt(t) * rx;
+            ctx.fillRect(Math.round(x + ox - span), Math.round(y + oy + dy), Math.round(span * 2), 1);
+          }
+        }
       }
     }
     ctx.globalAlpha = 1;
 
-    // Altitude color grade on skyExt
-    const fade = clamp(this.camY / (this._wrapH * 0.9) + this.climbT * 0.12, 0, 1);
-    const bucket = (fade * 16) | 0;
-    if (bucket !== this._skyFadeBucket) {
-      this._skyFadeBucket = bucket;
-      this.applySkyExtension(fade);
-    }
   };
 
   /* ---------- camera / transforms ---------- */
@@ -853,17 +1092,20 @@
     const nozzleLocalY = lb.top + sitCss - this.rocketY * scaleY;
     const rocketTopLocal = nozzleLocalY - stackH;
     const wrapH = this._wrapH || 390;
-    const desiredTop = wrapH * 0.10;
-    let targetCam = desiredTop - rocketTopLocal;
-    if (!this.released || this.climbT < 0.2) targetCam = 0;
+    // Frame so nozzle sits ~42% down — leaves room below for a long tapered plume
+    const desiredNozzle = wrapH * 0.42;
+    let targetCam = desiredNozzle - nozzleLocalY;
+    if (!this.released || this.climbT < 0.15) targetCam = 0;
     if (this.phase !== "linger") {
       targetCam = Math.max(0, targetCam);
-      this.camY = lerp(this.camY, targetCam, 0.2);
-      if (this.released && this.climbT >= 0.2) {
-        const topAfter = rocketTopLocal + this.camY;
-        if (topAfter < wrapH * 0.05) this.camY = wrapH * 0.05 - rocketTopLocal;
-        if (topAfter > wrapH * 0.16) this.camY = Math.max(0, wrapH * 0.10 - rocketTopLocal);
-        const maxCam = Math.max(0, lb.top + lb.height * 0.75);
+      this.camY = lerp(this.camY, targetCam, 0.18);
+      if (this.released && this.climbT >= 0.15) {
+        const nzAfter = nozzleLocalY + this.camY;
+        // Keep nozzle in the mid band so flame (below) stays on-screen
+        if (nzAfter < wrapH * 0.34) this.camY = wrapH * 0.34 - nozzleLocalY;
+        if (nzAfter > wrapH * 0.52) this.camY = Math.max(0, wrapH * 0.42 - nozzleLocalY);
+        // Tip may leave top — stack canvas has headroom; don't pull flame off bottom
+        const maxCam = Math.max(0, lb.top + lb.height * 0.85);
         if (this.camY > maxCam) this.camY = maxCam;
         if (this.camY < 0) this.camY = 0;
       } else {
@@ -879,20 +1121,8 @@
       world.style.transform =
         "translate3d(" + this._shakeX.toFixed(2) + "px," + (this.camY + this._shakeY).toFixed(2) + "px,0)";
     }
-    // Soften plate top edge into sky extension (≥40px blend)
-    const plate = this.getPlateEl && this.getPlateEl();
-    if (plate) {
-      if (this.camY > 8 && this.phase !== "linger") {
-        const fadePx = Math.min(120, 56 + this.camY * 0.22);
-        const m = "linear-gradient(to bottom, transparent 0px, #000 " + fadePx.toFixed(0) + "px, #000 100%)";
-        plate.style.webkitMaskImage = m;
-        plate.style.maskImage = m;
-      } else {
-        plate.style.webkitMaskImage = "";
-        plate.style.maskImage = "";
-      }
-    }
     this.applyRocketLight();
+    if (this.camY > 0 || this.phase === "climb" || this.phase === "hold") this.updateTallSkyPan();
   };
 
   LiftoffEngine.prototype.updateCountdown = function (elapsed) {
@@ -935,7 +1165,7 @@
         ignited: this.ignited, released: this.released,
         rocketY: this.rocketY, camY: this.camY, climbT: this.climbT,
         lingerT: this.lingerT, flame: this.flameIntensity,
-        app: "liftoff27",
+        app: "liftoff36",
       };
     } catch (_) {}
 
@@ -1047,7 +1277,7 @@
       global.__liftoffState = {
         elapsed: 0, phase: this.phase, countdown: 5,
         ignited: false, released: false, rocketY: 0, camY: 0,
-        climbT: 0, lingerT: 0, flame: 0, app: "liftoff27",
+        climbT: 0, lingerT: 0, flame: 0, app: "liftoff36",
       };
     } catch (_) {}
     if (!this.captureMode) {
