@@ -7,15 +7,15 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "liftoff50";
+  const BUILD = "liftoff51";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
   const EXIT_DUR = 1.5;    // camera eases off, rocket exits top — flight ends on the flight
   const CLIMB_A = 140;
   const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
-  const ZOOM_LAND_FLOOR = 0.72; // landscape zoom floor (CoE: ~0.72-0.75)
-  const PLUME_MIN_CSS = 170;  // landscape follow: keep >=150 px of plume on screen below the nozzle
+  const ZOOM_LAND_FLOOR = 0.58; // landscape zoom floor: adaptive per stack (tall stacks need room for the plume)
+  const PLUME_MIN_CSS = 170;  // landscape follow: keep >=170 px of plume on screen below the nozzle
   const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow
   const NOSE_FRAC_LAND = 0.05; // landscape: nose ~5% below the top edge
   const HULL_K = 1.3;         // flame sizing: modular core bottom width -> hull (fin-span) equivalent     // native px / s² (t² climb)
@@ -127,7 +127,7 @@
   };
 
   LiftoffEngine.prototype.reset = function () {
-    this._zoomS = 1;
+    this._zoomS = 1; this._zoomV = 0;
     this._altBlendT0 = null; this._altBlendU = 0;
     this.stop();
     this.phase = "idle";
@@ -1497,6 +1497,9 @@
       // room below the nozzle actually carries plume (it widens with altitude below)
       const rocketCss = (seat.stackH || seat.targetH || 480) * (lb.height / lb.nh) * zf;
       lenBase = Math.max(lenBase, rocketCss * (0.8 + 0.35 * u));
+      // once zoomed out, the plume always runs past the frame bottom (>=170 px room carries flame)
+      const zw = clamp((1 - zf) / 0.15, 0, 1);
+      if (zw > 0) lenBase = Math.max(lenBase, visRows * (1 + 0.35 * zw));
     }
     const longMode = lenBase > hullW * lenRatio + 1;
     const lenCss = lenBase * (longMode ? 1 + (flick - 1) * 0.4 : flick);
@@ -1869,10 +1872,15 @@
         if (D > 1 && blendOk) zAllowed = clamp((wrapH + 24 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
       }
       {
-        const zPrev = this._zoomS || 1;
-        const kz = 1 - Math.exp(-(this._lastDt || 1 / 60) * 2.2);
-        let zs = zAllowed >= zPrev ? zAllowed : zPrev + (zAllowed - zPrev) * kz;
-        this._zoomS = zs;
+        // Critically damped spring toward the allowed zoom (~1.2 s settle, C1: velocity starts
+        // at 0 -> no jerk). A lagging spring on a falling bound stays above it -> plate never shows.
+        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = 4.2;
+        let zs = this._zoomS || 1, vz = this._zoomV || 0;
+        const acc = W * W * (zAllowed - zs) - 2 * W * vz;
+        vz += acc * dtz; zs += vz * dtz;
+        if (zs < zAllowed) { zs = zAllowed; vz = Math.max(0, vz); }
+        if (zs > 1) { zs = 1; vz = 0; }
+        this._zoomS = zs; this._zoomV = vz;
         z = zs;
       }
       const noseTarget = wrapH * (landscape ? NOSE_FRAC_LAND : NOSE_FRAC);
