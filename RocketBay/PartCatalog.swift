@@ -26,7 +26,6 @@ enum SizeClass: String, Codable, CaseIterable {
     case l = "L"
     case xl = "XL"
 
-    /// Relative height multiplier for procedural sprites (logical units).
     var heightFactor: CGFloat {
         switch self {
         case .s: return 0.55
@@ -36,7 +35,6 @@ enum SizeClass: String, Codable, CaseIterable {
         }
     }
 
-    /// Relative diameter / width multiplier.
     var diameterFactor: CGFloat {
         switch self {
         case .s: return 0.55
@@ -54,14 +52,24 @@ struct RocketPart: Identifiable, Codable, Hashable {
     let role: PartRole
     let heightClass: SizeClass
     let diameterClass: SizeClass
-    /// Simple palette key for procedural coloring (not a trademark).
     let palette: String
 }
 
 enum PartCatalog {
+    /// Exact lock-tray labels (uniform pack NOTES): Moon Giant, Pencil Core,
+    /// Gridfin Booster, Steel Booster, Orange Tank, Euro Core.
+    static let lockTrayNames: [String] = [
+        "Moon Giant",
+        "Pencil Core",
+        "Gridfin Booster",
+        "Steel Booster",
+        "Orange Tank",
+        "Euro Core",
+    ]
+
     static let all: [RocketPart] = [
-        // MARK: - Stage 1 (S1-01 … S1-12)
-        RocketPart(id: "S1-01", displayName: "Moon Giant S1", role: .s1, heightClass: .xl, diameterClass: .xl, palette: "banded"),
+        // MARK: - Stage 1 (S1-01 … S1-12) — lock names exact where noted
+        RocketPart(id: "S1-01", displayName: "Moon Giant", role: .s1, heightClass: .xl, diameterClass: .xl, palette: "banded"),
         RocketPart(id: "S1-02", displayName: "Pencil Core", role: .s1, heightClass: .m, diameterClass: .m, palette: "corrugated"),
         RocketPart(id: "S1-03", displayName: "Cyan Giant Core", role: .s1, heightClass: .xl, diameterClass: .xl, palette: "cyanOrange"),
         RocketPart(id: "S1-04", displayName: "Gridfin Tower", role: .s1, heightClass: .l, diameterClass: .m, palette: "blackWhite"),
@@ -75,12 +83,12 @@ enum PartCatalog {
         RocketPart(id: "S1-12", displayName: "Blue Night Tower", role: .s1, heightClass: .xl, diameterClass: .l, palette: "blueBlack"),
 
         // MARK: - Stage 2 (S2-01 … S2-10)
-        RocketPart(id: "S2-01", displayName: "Moon Giant S2", role: .s2, heightClass: .l, diameterClass: .xl, palette: "banded"),
+        RocketPart(id: "S2-01", displayName: "Moon Giant Upper", role: .s2, heightClass: .l, diameterClass: .xl, palette: "banded"),
         RocketPart(id: "S2-02", displayName: "Moon Transfer", role: .s2, heightClass: .m, diameterClass: .l, palette: "banded"),
         RocketPart(id: "S2-03", displayName: "Pencil Upper", role: .s2, heightClass: .s, diameterClass: .s, palette: "corrugated"),
         RocketPart(id: "S2-04", displayName: "Vacuum Upper", role: .s2, heightClass: .m, diameterClass: .m, palette: "blackWhite"),
         RocketPart(id: "S2-05", displayName: "Silver Skin Tank", role: .s2, heightClass: .m, diameterClass: .s, palette: "silver"),
-        RocketPart(id: "S2-06", displayName: "Compact Cryo Upper", role: .s2, heightClass: .m, diameterClass: .m, palette: "white"),
+        RocketPart(id: "S2-06", displayName: "Euro Core", role: .s2, heightClass: .m, diameterClass: .m, palette: "white"),
         RocketPart(id: "S2-07", displayName: "Wide Cryo Upper", role: .s2, heightClass: .m, diameterClass: .l, palette: "whiteOrange"),
         RocketPart(id: "S2-08", displayName: "Toroid Upper", role: .s2, heightClass: .s, diameterClass: .m, palette: "outrigger"),
         RocketPart(id: "S2-09", displayName: "Sea Upper", role: .s2, heightClass: .m, diameterClass: .m, palette: "yellow"),
@@ -97,13 +105,18 @@ enum PartCatalog {
         RocketPart(id: "PL-08", displayName: "Sister Orbiter", role: .payload, heightClass: .m, diameterClass: .l, palette: "orbiter"),
 
         // MARK: - Side boosters (SB-01 … SB-06)
-        RocketPart(id: "SB-01", displayName: "Gridfin Booster Pair", role: .sideBooster, heightClass: .l, diameterClass: .m, palette: "blackWhite"),
-        RocketPart(id: "SB-02", displayName: "Segment Solid Pair", role: .sideBooster, heightClass: .l, diameterClass: .s, palette: "white"),
+        RocketPart(id: "SB-01", displayName: "Gridfin Booster", role: .sideBooster, heightClass: .l, diameterClass: .m, palette: "blackWhite"),
+        RocketPart(id: "SB-02", displayName: "Steel Booster", role: .sideBooster, heightClass: .l, diameterClass: .s, palette: "silver"),
         RocketPart(id: "SB-03", displayName: "Tall Solid Pair", role: .sideBooster, heightClass: .l, diameterClass: .s, palette: "white"),
         RocketPart(id: "SB-04", displayName: "Liquid Strap Pair", role: .sideBooster, heightClass: .l, diameterClass: .m, palette: "cyanOrange"),
         RocketPart(id: "SB-05", displayName: "Slim Solid Pair", role: .sideBooster, heightClass: .m, diameterClass: .s, palette: "white"),
         RocketPart(id: "SB-06", displayName: "Quad Liquid Boosters", role: .sideBooster, heightClass: .l, diameterClass: .m, palette: "whiteOrange"),
     ]
+
+    /// Six lock-tray entries in NOTES order (exact displayName).
+    static var lockTray: [RocketPart] {
+        lockTrayNames.compactMap { name in all.first { $0.displayName == name } }
+    }
 
     static func parts(role: PartRole) -> [RocketPart] {
         all.filter { $0.role == role }

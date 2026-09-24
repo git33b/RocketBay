@@ -2,7 +2,7 @@
   "parts": [
     {
       "id": "S1-01",
-      "displayName": "Moon Giant S1",
+      "displayName": "Moon Giant",
       "role": "S1",
       "heightClass": "XL",
       "diameterClass": "XL",
@@ -98,7 +98,7 @@
     },
     {
       "id": "S2-01",
-      "displayName": "Moon Giant S2",
+      "displayName": "Moon Giant Upper",
       "role": "S2",
       "heightClass": "L",
       "diameterClass": "XL",
@@ -138,7 +138,7 @@
     },
     {
       "id": "S2-06",
-      "displayName": "Compact Cryo Upper",
+      "displayName": "Euro Core",
       "role": "S2",
       "heightClass": "M",
       "diameterClass": "M",
@@ -242,7 +242,7 @@
     },
     {
       "id": "SB-01",
-      "displayName": "Gridfin Booster Pair",
+      "displayName": "Gridfin Booster",
       "role": "SideBooster",
       "heightClass": "L",
       "diameterClass": "M",
@@ -250,11 +250,11 @@
     },
     {
       "id": "SB-02",
-      "displayName": "Segment Solid Pair",
+      "displayName": "Steel Booster",
       "role": "SideBooster",
       "heightClass": "L",
       "diameterClass": "S",
-      "palette": "white"
+      "palette": "silver"
     },
     {
       "id": "SB-03",
