@@ -37,11 +37,11 @@
     },
     "03": {
       cx: 685,
-      sitY: 630,
-      deckY: 630,
+      sitY: 584,
+      deckY: 584,
       targetH: DEFAULT_TARGET_H,
       nozzleOffsetY: 0,
-      smokeOriginY: 630,
+      smokeOriginY: 584,
       emptyPad: "plates/empty/03-empty-pad-v5.png",
     },
     "04": {

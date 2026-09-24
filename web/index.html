@@ -197,14 +197,14 @@
     </div>
   </div>
 
-  <script src="pad-config.js?v=pad5v5"></script>
-  <script src="liftoff.js?v=liftoff46"></script>
+  <script src="pad-config.js?v=pad5v6"></script>
+  <script src="liftoff.js?v=liftoff47"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "compose4";
     const PAD_VER = "pad5";
-    const APP_VER = "liftoff46";
+    const APP_VER = "liftoff47";
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
@@ -739,7 +739,8 @@
       // Hide bottom chrome during liftoff so pad/plume aren't covered
       opsEl.classList.toggle("on", p === "grounded");
       document.getElementById("chrome").classList.toggle("liftoffHidden", p === "liftoff");
-      document.getElementById("todRow").style.display = (p === "liftoff") ? "none" : "";
+      const fb = !!state.flightBackdrop && (p === "mission" || p === "outcome");
+      document.getElementById("todRow").style.display = (p === "liftoff" || fb) ? "none" : "";
       document.getElementById("meta").style.display = (p === "liftoff") ? "none" : "";
       document.getElementById("hud").style.display = (p === "liftoff") ? "none" : "";
       missionBox.classList.toggle("on", p === "mission");
@@ -747,7 +748,7 @@
       phaseHud.textContent = p.toUpperCase();
       stackHud.textContent = stackSummary();
       launchBtn.disabled = !canLaunch();
-      plateWrap.classList.toggle("liftoffClimb", p === "liftoff");
+      plateWrap.classList.toggle("liftoffClimb", p === "liftoff" || fb);
     }
 
     function renderOps(activeIdx) {
@@ -821,12 +822,11 @@
         getStackEl: () => stackEl,
         getPlateEl: () => plate,
         onComplete: () => {
+          // v3: end ON the flight — keep the high-altitude sky / departing plume as the
+          // mission backdrop (no hard cut back to the pad plate). Restart resets the engine.
           state.phase = "mission";
+          state.flightBackdrop = true;
           clearStackOverlay();
-          if (liftoffEngine) {
-            // keep lingering particles cleared on mission plate change
-            liftoffEngine.reset();
-          }
           render();
         },
         onPerfSample: (samples) => { lastPerf = samples; window.__liftoffPerf = samples; },
@@ -902,6 +902,7 @@
     document.getElementById("exploreBtn").onclick = () => finishMission("explore");
     document.getElementById("restartBtn").onclick = () => {
       if (liftoffEngine) liftoffEngine.reset();
+      state.flightBackdrop = false;
       state.phase = "assemble";
       state.missionChoice = null;
       state.selected = {
