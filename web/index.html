@@ -22,10 +22,11 @@
     #plate {
       width: 100%; height: 100%;
       object-fit: contain; object-position: center;
-      background: #000; display: block;
+      background: transparent; display: block;
     }
     #skyExt {
-      position: absolute; inset: 0; pointer-events: none; z-index: 0;
+      position: absolute; left: 0; right: 0; top: -120%; bottom: -30%;
+      pointer-events: none; z-index: 0;
       opacity: 0; transition: none;
     }
     #world {
@@ -50,16 +51,25 @@
     #stack.on { display: block; }
     #fxCanvas {
       position: absolute; pointer-events: none;
-      display: none; z-index: 2;
+      display: none; z-index: 4;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
+      will-change: transform;
+      transform-origin: 50% 100%;
+    }
+    #chrome.liftoffHidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translate3d(0, 110%, 0);
+      transition: opacity 0.2s, transform 0.25s;
     }
     #countdownHud {
-      position: absolute; inset: 0; z-index: 5; pointer-events: none;
-      display: none; align-items: center; justify-content: center;
-      font-size: clamp(42px, 12vw, 96px); font-weight: 900;
-      letter-spacing: 0.08em; color: #fff;
-      text-shadow: 0 0 12px rgba(255,140,0,.85), 0 2px 0 #000;
+      position: absolute; top: calc(4px + env(safe-area-inset-top)); left: 0; right: 0;
+      z-index: 6; pointer-events: none;
+      display: none; text-align: center;
+      font-size: clamp(14px, 3.2vw, 22px); font-weight: 900;
+      letter-spacing: 0.16em; color: #ffe8a0;
+      text-shadow: 0 0 8px rgba(255,120,0,.9), 0 1px 0 #000;
     }
     #hud {
       position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 10px; right: 10px;
@@ -130,12 +140,12 @@
 <body>
   <div id="stage">
     <div id="skyExt" aria-hidden="true"></div>
+    <div id="countdownHud" aria-live="polite"></div>
     <div id="world">
       <div id="plateWrap">
         <img id="plate" alt="Rocket Bay pad" draggable="false" />
         <canvas id="stack" width="1" height="1" aria-hidden="true"></canvas>
         <canvas id="fxCanvas" width="1" height="1" aria-hidden="true"></canvas>
-        <div id="countdownHud" aria-live="polite"></div>
         <div id="hud">
           <div class="pill" id="stackHud">Select parts</div>
           <div class="pill" id="phaseHud">ASSEMBLE</div>
@@ -174,14 +184,24 @@
     </div>
   </div>
 
-  <script src="liftoff.js?v=liftoff2"></script>
+  <script src="pad-config.js?v=pad1"></script>
+  <script src="liftoff.js?v=liftoff20"></script>
   <script>
-    const NATIVE_W = 1280, NATIVE_H = 720;
-    const SIT_Y = 548, TARGET_H = 500;
-    const CX = { "02": 556, "03": 685, "04": 717, "05": 634 };
+    const _padAPI = window.RocketBayPadConfig || {};
+    const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "compose4";
-    const PAD_VER = "compose4";
-    const APP_VER = "liftoff2";
+    const PAD_VER = "pad1";
+    const APP_VER = "liftoff20";
+
+    function padCfg(todId) {
+      if (_padAPI.padFor) return _padAPI.padFor(todId);
+      // Fallback if pad-config.js failed to load
+      return {
+        cx: 640, sitY: 548, deckY: 548, targetH: 500,
+        nozzleOffsetY: 0, smokeOriginY: 548,
+        emptyPad: "plates/empty/" + todId + "-empty-pad-v2.png",
+      };
+    }
 
     const TODS = [
       { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
@@ -296,8 +316,8 @@
     function plateSrc() {
       const tod = TODS[state.todIndex];
       if (usesEmptyPad()) {
-        // CoE PASS empty-pad-v2 PNG (never grounded/assemble baked rocket)
-        return `plates/empty/${tod.id}-empty-pad-v2.png?v=${PAD_VER}`;
+        const cfg = padCfg(tod.id);
+        return `${cfg.emptyPad}?v=${PAD_VER}`;
       }
       return `plates/${tod.id}-mission-${tod.file}.jpg`;
     }
@@ -407,7 +427,7 @@
     }
 
     /** Last composed seat in native plate coords — used by liftoff plume. */
-    let lastSeat = { cx: 640, sitY: SIT_Y, width: 120, nozzles: [0], nw: NATIVE_W, nh: NATIVE_H };
+    let lastSeat = { cx: 640, sitY: 548, deckY: 548, nozzleY: 548, smokeY: 548, width: 120, nozzles: [0], nw: NATIVE_W, nh: NATIVE_H };
 
     function computeNozzles(width, boostId) {
       // Offsets from stack CX in native px
@@ -424,13 +444,19 @@
 
     function noteSeat(drawInfo, cx, sitY, boostId) {
       const w = Math.max(40, drawInfo.dw || 120);
+      const tod = TODS[state.todIndex].id;
+      const cfg = padCfg(tod);
       lastSeat = {
         cx: cx,
         sitY: sitY,
+        deckY: cfg.deckY,
+        nozzleY: sitY + (cfg.nozzleOffsetY || 0),
+        smokeY: cfg.smokeOriginY != null ? cfg.smokeOriginY : cfg.deckY,
         width: w,
         nozzles: computeNozzles(w, boostId),
         nw: NATIVE_W,
         nh: NATIVE_H,
+        targetH: cfg.targetH,
       };
       return drawInfo;
     }
@@ -464,9 +490,10 @@
       ctx.globalAlpha = 1;
 
       const tod = TODS[state.todIndex].id;
-      const cx = CX[tod];
-      const sitY = SIT_Y;
-      const targetH = TARGET_H;
+      const cfg = padCfg(tod);
+      const cx = cfg.cx;
+      const sitY = cfg.sitY;
+      const targetH = cfg.targetH;
       const sel = state.selected;
       const boost = sel.boosters;
 
@@ -663,7 +690,12 @@
     function setChrome() {
       const p = state.phase;
       assembleUI.style.display = p === "assemble" ? "block" : "none";
-      opsEl.classList.toggle("on", p === "grounded" || p === "liftoff");
+      // Hide bottom chrome during liftoff so pad/plume aren't covered
+      opsEl.classList.toggle("on", p === "grounded");
+      document.getElementById("chrome").classList.toggle("liftoffHidden", p === "liftoff");
+      document.getElementById("todRow").style.display = (p === "liftoff") ? "none" : "";
+      document.getElementById("meta").style.display = (p === "liftoff") ? "none" : "";
+      document.getElementById("hud").style.display = (p === "liftoff") ? "none" : "";
       missionBox.classList.toggle("on", p === "mission");
       outcomeBox.classList.toggle("on", p === "outcome");
       phaseHud.textContent = p.toUpperCase();
@@ -721,7 +753,15 @@
         getLetterbox: () => letterboxRect(),
         getSeat: () => {
           const tod = TODS[state.todIndex].id;
-          return Object.assign({}, lastSeat, { cx: CX[tod], sitY: SIT_Y });
+          const cfg = padCfg(tod);
+          return Object.assign({}, lastSeat, {
+            cx: cfg.cx,
+            sitY: cfg.sitY,
+            deckY: cfg.deckY,
+            nozzleY: cfg.sitY + (cfg.nozzleOffsetY || 0),
+            smokeY: cfg.smokeOriginY != null ? cfg.smokeOriginY : cfg.deckY,
+            targetH: cfg.targetH,
+          });
         },
         getTodId: () => TODS[state.todIndex].id,
         getWorldEl: () => worldEl,
@@ -729,6 +769,7 @@
         getFxCanvas: () => fxCanvas,
         getCountdownEl: () => countdownHud,
         getStackEl: () => stackEl,
+        getPlateEl: () => plate,
         onComplete: () => {
           state.phase = "mission";
           clearStackOverlay();
