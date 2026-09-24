@@ -37,3 +37,8 @@
 ## Stack rules (designing now)
 - Side boosters: show 0 / 2 / 4 (max 4).
 - Second stages: up to 2 stacked on S1 before payload.
+
+## Silhouette lock (2026-09-23 Ateeb)
+Parts **look like** historical + current vehicles (Falcon 9, Starship-class, Saturn V, R-7/Soyuz, SLS/Artemis, Ariane, Proton, CZ-5, etc.).
+Player-facing: **generic labels only** — no agency logos, no trademarked names in art/UI/metadata.
+Internal map: research catalog IDs in brief + rocket-score-model.md.

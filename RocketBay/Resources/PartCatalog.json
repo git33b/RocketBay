@@ -1,0 +1,293 @@
+{
+  "parts": [
+    {
+      "id": "S1-01",
+      "displayName": "Moon Giant S1",
+      "role": "S1",
+      "heightClass": "XL",
+      "diameterClass": "XL",
+      "palette": "banded"
+    },
+    {
+      "id": "S1-02",
+      "displayName": "Pencil Core",
+      "role": "S1",
+      "heightClass": "M",
+      "diameterClass": "M",
+      "palette": "corrugated"
+    },
+    {
+      "id": "S1-03",
+      "displayName": "Cyan Giant Core",
+      "role": "S1",
+      "heightClass": "XL",
+      "diameterClass": "XL",
+      "palette": "cyanOrange"
+    },
+    {
+      "id": "S1-04",
+      "displayName": "Gridfin Tower",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "blackWhite"
+    },
+    {
+      "id": "S1-05",
+      "displayName": "Smooth Core",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "silver"
+    },
+    {
+      "id": "S1-06",
+      "displayName": "Green Cryo Core",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "green"
+    },
+    {
+      "id": "S1-07",
+      "displayName": "White Nozzle Core",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "white"
+    },
+    {
+      "id": "S1-08",
+      "displayName": "Wide Cryo Core",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "L",
+      "palette": "whiteOrange"
+    },
+    {
+      "id": "S1-09",
+      "displayName": "Outrigger Hex",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "L",
+      "palette": "outrigger"
+    },
+    {
+      "id": "S1-10",
+      "displayName": "Yellow Clean Core",
+      "role": "S1",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "yellow"
+    },
+    {
+      "id": "S1-11",
+      "displayName": "Orange Foam Core",
+      "role": "S1",
+      "heightClass": "XL",
+      "diameterClass": "XL",
+      "palette": "orange"
+    },
+    {
+      "id": "S1-12",
+      "displayName": "Blue Night Tower",
+      "role": "S1",
+      "heightClass": "XL",
+      "diameterClass": "L",
+      "palette": "blueBlack"
+    },
+    {
+      "id": "S2-01",
+      "displayName": "Moon Giant S2",
+      "role": "S2",
+      "heightClass": "L",
+      "diameterClass": "XL",
+      "palette": "banded"
+    },
+    {
+      "id": "S2-02",
+      "displayName": "Moon Transfer",
+      "role": "S2",
+      "heightClass": "M",
+      "diameterClass": "L",
+      "palette": "banded"
+    },
+    {
+      "id": "S2-03",
+      "displayName": "Pencil Upper",
+      "role": "S2",
+      "heightClass": "S",
+      "diameterClass": "S",
+      "palette": "corrugated"
+    },
+    {
+      "id": "S2-04",
+      "displayName": "Vacuum Upper",
+      "role": "S2",
+      "heightClass": "M",
+      "diameterClass": "M",
+      "palette": "blackWhite"
+    },
+    {
+      "id": "S2-05",
+      "displayName": "Silver Skin Tank",
+      "role": "S2",
+      "heightClass": "M",
+      "diameterClass": "S",
+      "palette": "silver"
+    },
+    {
+      "id": "S2-06",
+      "displayName": "Compact Cryo Upper",
+      "role": "S2",
+      "heightClass": "M",
+      "diameterClass": "M",
+      "palette": "white"
+    },
+    {
+      "id": "S2-07",
+      "displayName": "Wide Cryo Upper",
+      "role": "S2",
+      "heightClass": "M",
+      "diameterClass": "L",
+      "palette": "whiteOrange"
+    },
+    {
+      "id": "S2-08",
+      "displayName": "Toroid Upper",
+      "role": "S2",
+      "heightClass": "S",
+      "diameterClass": "M",
+      "palette": "outrigger"
+    },
+    {
+      "id": "S2-09",
+      "displayName": "Sea Upper",
+      "role": "S2",
+      "heightClass": "M",
+      "diameterClass": "M",
+      "palette": "yellow"
+    },
+    {
+      "id": "S2-10",
+      "displayName": "Wide Hydro Upper",
+      "role": "S2",
+      "heightClass": "L",
+      "diameterClass": "L",
+      "palette": "blueBlack"
+    },
+    {
+      "id": "PL-01",
+      "displayName": "Escape Cone",
+      "role": "Payload",
+      "heightClass": "S",
+      "diameterClass": "M",
+      "palette": "cone"
+    },
+    {
+      "id": "PL-02",
+      "displayName": "Ball Cone Capsule",
+      "role": "Payload",
+      "heightClass": "S",
+      "diameterClass": "S",
+      "palette": "capsule"
+    },
+    {
+      "id": "PL-03",
+      "displayName": "Orbiter Delta",
+      "role": "Payload",
+      "heightClass": "M",
+      "diameterClass": "L",
+      "palette": "orbiter"
+    },
+    {
+      "id": "PL-04",
+      "displayName": "Orange Tank",
+      "role": "Payload",
+      "heightClass": "L",
+      "diameterClass": "L",
+      "palette": "orange"
+    },
+    {
+      "id": "PL-05",
+      "displayName": "Trunc Capsule",
+      "role": "Payload",
+      "heightClass": "S",
+      "diameterClass": "S",
+      "palette": "capsule"
+    },
+    {
+      "id": "PL-06",
+      "displayName": "Dual Nest Fairing",
+      "role": "Payload",
+      "heightClass": "M",
+      "diameterClass": "M",
+      "palette": "fairing"
+    },
+    {
+      "id": "PL-07",
+      "displayName": "Round Fairing",
+      "role": "Payload",
+      "heightClass": "M",
+      "diameterClass": "M",
+      "palette": "fairing"
+    },
+    {
+      "id": "PL-08",
+      "displayName": "Sister Orbiter",
+      "role": "Payload",
+      "heightClass": "M",
+      "diameterClass": "L",
+      "palette": "orbiter"
+    },
+    {
+      "id": "SB-01",
+      "displayName": "Gridfin Booster Pair",
+      "role": "SideBooster",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "blackWhite"
+    },
+    {
+      "id": "SB-02",
+      "displayName": "Segment Solid Pair",
+      "role": "SideBooster",
+      "heightClass": "L",
+      "diameterClass": "S",
+      "palette": "white"
+    },
+    {
+      "id": "SB-03",
+      "displayName": "Tall Solid Pair",
+      "role": "SideBooster",
+      "heightClass": "L",
+      "diameterClass": "S",
+      "palette": "white"
+    },
+    {
+      "id": "SB-04",
+      "displayName": "Liquid Strap Pair",
+      "role": "SideBooster",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "cyanOrange"
+    },
+    {
+      "id": "SB-05",
+      "displayName": "Slim Solid Pair",
+      "role": "SideBooster",
+      "heightClass": "M",
+      "diameterClass": "S",
+      "palette": "white"
+    },
+    {
+      "id": "SB-06",
+      "displayName": "Quad Liquid Boosters",
+      "role": "SideBooster",
+      "heightClass": "L",
+      "diameterClass": "M",
+      "palette": "whiteOrange"
+    }
+  ],
+  "note": "Research ids (S1-01 etc.) are internal keys only. UI must use displayName. No agency/company trademarks."
+}

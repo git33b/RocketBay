@@ -37,7 +37,7 @@ struct SkyPalette {
 }
 
 enum SkyClock {
-    /// Optional mock hour (0-23) for testing; nil = use device local time.
+    /// Optional mock hour (0–23) for testing; nil = use device local time.
     static var mockHour: Int? = nil
 
     static func currentHour(now: Date = Date(), calendar: Calendar = .current) -> Int {
@@ -46,7 +46,7 @@ enum SkyClock {
     }
 
     /// Rough bands (local clock, no lat/lon):
-    /// night 21-5 · blue 5-7 & 19-21 · golden 7-9 & 17-19 · day 9-17
+    /// night 21–5 · blue 5–7 & 19–21 · golden 7–9 & 17–19 · day 9–17
     static func period(forHour hour: Int) -> SkyPeriod {
         switch hour {
         case 21...23, 0..<5: return .night
