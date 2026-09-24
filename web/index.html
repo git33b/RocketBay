@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#000000" />
-  <title>Rocket Bay — stills trial</title>
+  <title>Rocket Bay — playable trial</title>
   <style>
-    :root { color-scheme: dark; }
+    :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
       margin: 0; height: 100%; background: #000; color: #fff;
@@ -19,126 +19,362 @@
       display: flex; align-items: center; justify-content: center;
       background: #000;
     }
+    #plateWrap {
+      position: relative; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+    }
     #plate {
       width: 100%; height: 100%;
       object-fit: contain; object-position: center;
       background: #000; display: block;
-      touch-action: none;
+    }
+    #fx {
+      position: absolute; inset: 0; pointer-events: none;
+      display: none; align-items: flex-end; justify-content: center;
+    }
+    #fx.on { display: flex; }
+    #flames {
+      width: min(28vw, 180px); height: min(40vh, 260px);
+      margin-bottom: 8%;
+      background:
+        radial-gradient(ellipse at 50% 0%, #fff 0%, #ffe566 18%, #ff8c00 45%, #ff3b00 70%, transparent 78%),
+        radial-gradient(ellipse at 35% 10%, #ffcc66 0%, transparent 55%),
+        radial-gradient(ellipse at 65% 10%, #ffaa33 0%, transparent 55%);
+      filter: blur(1px);
+      animation: roar 0.12s infinite alternate;
+      opacity: 0.95;
+      mix-blend-mode: screen;
+    }
+    @keyframes roar {
+      from { transform: scaleY(0.92) scaleX(0.96) translateY(4px); opacity: 0.85; }
+      to { transform: scaleY(1.08) scaleX(1.04) translateY(-6px); opacity: 1; }
+    }
+    #plateWrap.shake { animation: shake 0.45s linear infinite; }
+    @keyframes shake {
+      0%, 100% { transform: translate(0,0); }
+      25% { transform: translate(-3px, 2px); }
+      50% { transform: translate(3px, -2px); }
+      75% { transform: translate(-2px, -1px); }
+    }
+    #hud {
+      position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 10px; right: 10px;
+      display: flex; justify-content: space-between; gap: 8px; pointer-events: none;
+    }
+    #hud .pill {
+      background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 8px; padding: 6px 8px; font-size: 10px; line-height: 1.35;
+      max-width: 58%;
     }
     #chrome {
       position: fixed; left: 0; right: 0; bottom: 0;
-      padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
-      background: linear-gradient(transparent, rgba(0,0,0,.85));
+      padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+      background: linear-gradient(transparent, rgba(0,0,0,.92) 28%);
       display: flex; flex-direction: column; gap: 8px;
+      max-height: 48vh; overflow: auto;
     }
-    #meta {
-      font-size: 11px; letter-spacing: .04em; opacity: .85;
-      text-align: center;
-    }
-    .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
-    button {
+    .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; align-items: center; }
+    button, .chip {
       appearance: none; border: 0; border-radius: 6px;
-      padding: 10px 12px; font: inherit; font-size: 12px; font-weight: 700;
+      padding: 9px 11px; font: inherit; font-size: 11px; font-weight: 700;
       color: #fff; background: rgba(255,255,255,.14); cursor: pointer;
     }
-    button.active { background: rgba(255,140,0,.9); }
-    button.phase { min-width: 96px; }
-    button.nav { background: rgba(0,180,220,.35); }
-    #hint {
-      position: fixed; top: 10px; left: 0; right: 0;
-      text-align: center; font-size: 10px; opacity: .55;
-      pointer-events: none; padding-top: env(safe-area-inset-top);
+    button.active, .chip.active { background: rgba(255,140,0,.92); }
+    button.primary { background: rgba(255,140,0,.92); min-width: 140px; }
+    button.primary:disabled { background: rgba(120,120,120,.45); cursor: not-allowed; }
+    button.cyan { background: rgba(0,180,220,.45); }
+    button.ghost { background: rgba(255,255,255,.1); }
+    #tabs button { min-width: 72px; }
+    #cards {
+      display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px;
+      -webkit-overflow-scrolling: touch;
     }
+    .card {
+      flex: 0 0 auto; width: 108px; padding: 6px;
+      background: rgba(255,255,255,.1); border-radius: 8px;
+      border: 2px solid transparent; text-align: center;
+    }
+    .card.selected { border-color: var(--cyan); background: rgba(0,200,224,.22); }
+    .card img {
+      width: 100%; height: 64px; object-fit: contain; display: block;
+      image-rendering: auto; background: rgba(0,0,0,.25); border-radius: 4px;
+    }
+    .card .name { font-size: 10px; margin-top: 5px; line-height: 1.2; font-weight: 700; }
+    #ops {
+      display: none; gap: 6px; flex-wrap: wrap; justify-content: center;
+    }
+    #ops.on { display: flex; }
+    .op {
+      font-size: 10px; padding: 6px 8px; border-radius: 999px;
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15);
+    }
+    .op.done { background: rgba(40,180,90,.35); border-color: rgba(80,220,120,.5); }
+    .op.run { background: rgba(255,140,0,.35); border-color: var(--accent); }
+    #missionBox, #outcomeBox { display: none; flex-direction: column; gap: 8px; align-items: center; }
+    #missionBox.on, #outcomeBox.on { display: flex; }
+    #outcomeBox .score {
+      font-size: 18px; font-weight: 900; letter-spacing: .06em; color: #ffe08a;
+    }
+    #meta { text-align: center; font-size: 10px; opacity: .8; letter-spacing: .03em; }
+    #todRow button { min-width: 64px; }
   </style>
 </head>
 <body>
-  <div id="hint">swipe ← → phase · pick TOD below</div>
-  <div id="stage"><img id="plate" alt="Rocket Bay still" draggable="false" /></div>
-  <div id="chrome">
-    <div id="meta"></div>
-    <div class="row" id="tods"></div>
-    <div class="row">
-      <button type="button" class="nav" id="prev">◀ PREV</button>
-      <button type="button" class="phase" data-phase="assemble">ASSEMBLE</button>
-      <button type="button" class="phase" data-phase="grounded">GROUNDED</button>
-      <button type="button" class="phase" data-phase="mission">MISSION</button>
-      <button type="button" class="nav" id="next">NEXT ▶</button>
+  <div id="stage">
+    <div id="plateWrap">
+      <img id="plate" alt="Rocket Bay still" draggable="false" />
+      <div id="fx"><div id="flames"></div></div>
+      <div id="hud">
+        <div class="pill" id="stackHud">Select parts</div>
+        <div class="pill" id="phaseHud">ASSEMBLE</div>
+      </div>
     </div>
   </div>
+
+  <div id="chrome">
+    <div id="meta"></div>
+    <div class="row" id="todRow"></div>
+
+    <div id="assembleUI">
+      <div class="row" id="tabs"></div>
+      <div id="cards"></div>
+      <div class="row">
+        <button type="button" class="ghost" id="clearBtn">CLEAR</button>
+        <button type="button" class="primary" id="launchBtn" disabled>GO FOR LAUNCH</button>
+      </div>
+    </div>
+
+    <div id="ops" class="row" aria-label="Pad ops"></div>
+
+    <div id="missionBox">
+      <div class="row">
+        <button type="button" class="cyan" id="deployBtn">Deploy payload</button>
+        <button type="button" class="cyan" id="exploreBtn">Explore the universe</button>
+      </div>
+    </div>
+
+    <div id="outcomeBox">
+      <div class="score" id="outcomeScore"></div>
+      <div id="outcomeText" style="font-size:12px;opacity:.9;text-align:center"></div>
+      <button type="button" class="primary" id="restartBtn">FLY AGAIN</button>
+    </div>
+  </div>
+
   <script>
     const TODS = [
-      { id: "02", label: "SUNRISE", file: "sunrise" },
-      { id: "03", label: "SUNSET", file: "sunset" },
-      { id: "04", label: "NIGHT", file: "night" },
-      { id: "05", label: "DAY", file: "day" },
+      { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
+      { id: "03", label: "SUNSET", file: "sunset", hourHint: [17, 18] },
+      { id: "04", label: "NIGHT", file: "night", hourHint: [19, 20, 21, 22, 23, 0, 1, 2, 3, 4] },
+      { id: "05", label: "DAY", file: "day", hourHint: [9, 10, 11, 12, 13, 14, 15, 16] },
     ];
-    const PHASES = ["assemble", "grounded", "mission"];
-    let todIndex = 0;
-    let phaseIndex = 0;
+    const PHASES = ["assemble", "grounded", "liftoff", "mission", "outcome"];
+    const PARTS = {
+      s1: [
+        { id: "moon-giant", name: "Moon Giant", role: "s1" },
+        { id: "pencil-core", name: "Pencil Core", role: "s1" },
+      ],
+      s2: [
+        { id: "euro-core", name: "Euro Core", role: "s2" },
+      ],
+      payload: [
+        { id: "orange-tank", name: "Orange Tank", role: "payload" },
+      ],
+      boosters: [
+        { id: "gridfin-booster", name: "Gridfin Booster", role: "boosters" },
+        { id: "steel-booster", name: "Steel Booster", role: "boosters" },
+      ],
+    };
+    const ROLE_TABS = [
+      { key: "s1", label: "1ST STAGE" },
+      { key: "s2", label: "2ND STAGE" },
+      { key: "payload", label: "PAYLOAD" },
+      { key: "boosters", label: "BOOSTERS" },
+    ];
+
+    const state = {
+      todIndex: 0,
+      phase: "assemble",
+      tab: "s1",
+      selected: { s1: null, s2: null, payload: null, boosters: null },
+      missionChoice: null,
+      ops: [],
+    };
 
     const plate = document.getElementById("plate");
+    const plateWrap = document.getElementById("plateWrap");
+    const fx = document.getElementById("fx");
     const meta = document.getElementById("meta");
-    const todRow = document.getElementById("tods");
+    const todRow = document.getElementById("todRow");
+    const tabs = document.getElementById("tabs");
+    const cards = document.getElementById("cards");
+    const launchBtn = document.getElementById("launchBtn");
+    const assembleUI = document.getElementById("assembleUI");
+    const opsEl = document.getElementById("ops");
+    const missionBox = document.getElementById("missionBox");
+    const outcomeBox = document.getElementById("outcomeBox");
+    const stackHud = document.getElementById("stackHud");
+    const phaseHud = document.getElementById("phaseHud");
+
+    function todFromHour(h) {
+      if (h >= 6 && h <= 8) return 0;
+      if (h >= 17 && h <= 18) return 1;
+      if (h >= 19 || h <= 4) return 2;
+      if (h === 5) return 0; // blue morning → sunrise
+      return 3; // day
+    }
+    state.todIndex = todFromHour(new Date().getHours());
 
     TODS.forEach((t, i) => {
       const b = document.createElement("button");
       b.type = "button";
       b.textContent = t.label;
-      b.dataset.tod = String(i);
-      b.addEventListener("click", () => { todIndex = i; render(); });
+      b.addEventListener("click", () => { state.todIndex = i; render(); });
       todRow.appendChild(b);
     });
 
-    function srcFor(tod, phase) {
+    ROLE_TABS.forEach((t) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.tab = t.key;
+      b.textContent = t.label;
+      b.addEventListener("click", () => { state.tab = t.key; renderCards(); renderTabs(); });
+      tabs.appendChild(b);
+    });
+
+    function plateSrc() {
+      const tod = TODS[state.todIndex];
+      // liftoff uses grounded plate + FX; outcome uses mission plate
+      let phase = state.phase;
+      if (phase === "liftoff") phase = "grounded";
+      if (phase === "outcome") phase = "mission";
       return `plates/${tod.id}-${phase}-${tod.file}.jpg`;
     }
 
-    function render() {
-      const tod = TODS[todIndex];
-      const phase = PHASES[phaseIndex];
-      const src = srcFor(tod, phase);
-      if (plate.getAttribute("src") !== src) plate.src = src;
-      meta.textContent = `${tod.id} ${tod.label} · ${phase.toUpperCase()} · 1280×720 lock`;
-      [...todRow.children].forEach((b, i) => b.classList.toggle("active", i === todIndex));
-      document.querySelectorAll("button.phase").forEach((b) => {
-        b.classList.toggle("active", b.dataset.phase === phase);
-      });
-      history.replaceState(null, "", `#${tod.id}-${phase}`);
+    function kitSrc(partId) {
+      const tod = TODS[state.todIndex].id;
+      return `kit/lit/${tod}/${partId}.png`;
     }
 
-    function stepPhase(delta) {
-      phaseIndex = (phaseIndex + delta + PHASES.length) % PHASES.length;
+    function canLaunch() {
+      return !!(state.selected.s1 && state.selected.s2 && state.selected.payload);
+    }
+
+    function stackSummary() {
+      const s = state.selected;
+      const bits = [
+        s.s1?.name || "—",
+        s.s2?.name || "—",
+        s.payload?.name || "—",
+      ];
+      let line = bits.join(" / ");
+      if (s.boosters) line += ` + ${s.boosters.name}`;
+      return line;
+    }
+
+    function renderTabs() {
+      [...tabs.children].forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
+    }
+
+    function renderCards() {
+      cards.innerHTML = "";
+      PARTS[state.tab].forEach((p) => {
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = "card" + (state.selected[p.role]?.id === p.id ? " selected" : "");
+        el.innerHTML = `<img alt="" src="${kitSrc(p.id)}" /><div class="name">${p.name}</div>`;
+        el.addEventListener("click", () => {
+          if (state.phase !== "assemble") return;
+          state.selected[p.role] = p;
+          render();
+        });
+        cards.appendChild(el);
+      });
+    }
+
+    function setChrome() {
+      const p = state.phase;
+      assembleUI.style.display = p === "assemble" ? "block" : "none";
+      opsEl.classList.toggle("on", p === "grounded" || p === "liftoff");
+      missionBox.classList.toggle("on", p === "mission");
+      outcomeBox.classList.toggle("on", p === "outcome");
+      fx.classList.toggle("on", p === "liftoff");
+      plateWrap.classList.toggle("shake", p === "liftoff");
+      phaseHud.textContent = p.toUpperCase();
+      stackHud.textContent = stackSummary();
+      launchBtn.disabled = !canLaunch();
+    }
+
+    function renderOps(activeIdx) {
+      const steps = ["CHECKS", "FUEL", "STATIC FIRE", "COUNTDOWN"];
+      opsEl.innerHTML = "";
+      steps.forEach((label, i) => {
+        const d = document.createElement("div");
+        d.className = "op" + (i < activeIdx ? " done" : i === activeIdx ? " run" : "");
+        d.textContent = label;
+        opsEl.appendChild(d);
+      });
+    }
+
+    function render() {
+      const tod = TODS[state.todIndex];
+      const src = plateSrc();
+      if (plate.getAttribute("src") !== src) plate.src = src;
+      meta.textContent = `${tod.id} ${tod.label} · ${state.phase.toUpperCase()} · locked plate`;
+      [...todRow.children].forEach((b, i) => b.classList.toggle("active", i === state.todIndex));
+      renderTabs();
+      renderCards();
+      setChrome();
+      history.replaceState(null, "", `#${tod.id}-${state.phase}`);
+    }
+
+    document.getElementById("clearBtn").onclick = () => {
+      state.selected = { s1: null, s2: null, payload: null, boosters: null };
+      render();
+    };
+
+    async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+    launchBtn.onclick = async () => {
+      if (!canLaunch() || state.phase !== "assemble") return;
+      state.phase = "grounded";
+      render();
+      renderOps(0);
+      for (let i = 0; i < 4; i++) {
+        renderOps(i);
+        await sleep(550);
+      }
+      renderOps(4);
+      await sleep(350);
+      state.phase = "liftoff";
+      render();
+      await sleep(2200);
+      state.phase = "mission";
+      render();
+    };
+
+    function finishMission(choice) {
+      state.missionChoice = choice;
+      state.phase = "outcome";
+      const base = 62 + Math.floor(Math.random() * 18);
+      const boost = state.selected.boosters ? 8 : 0;
+      const score = Math.min(99, base + boost + (choice === "explore" ? 5 : 3));
+      document.getElementById("outcomeScore").textContent = `ROCKET SCORE ${score}`;
+      document.getElementById("outcomeText").textContent =
+        choice === "deploy"
+          ? `${state.selected.payload.name} deployed from ${state.selected.s1.name} stack. Clean separation.`
+          : `${state.selected.s1.name} / ${state.selected.s2.name} coasting — explore path locked in.`;
       render();
     }
 
-    document.getElementById("prev").onclick = () => stepPhase(-1);
-    document.getElementById("next").onclick = () => stepPhase(1);
-    document.querySelectorAll("button.phase").forEach((b) => {
-      b.addEventListener("click", () => {
-        phaseIndex = PHASES.indexOf(b.dataset.phase);
-        render();
-      });
-    });
+    document.getElementById("deployBtn").onclick = () => finishMission("deploy");
+    document.getElementById("exploreBtn").onclick = () => finishMission("explore");
+    document.getElementById("restartBtn").onclick = () => {
+      state.phase = "assemble";
+      state.missionChoice = null;
+      state.selected = { s1: null, s2: null, payload: null, boosters: null };
+      state.todIndex = todFromHour(new Date().getHours());
+      render();
+    };
 
-    // Swipe on plate
-    let x0 = null;
-    const stage = document.getElementById("stage");
-    stage.addEventListener("touchstart", (e) => { x0 = e.changedTouches[0].clientX; }, { passive: true });
-    stage.addEventListener("touchend", (e) => {
-      if (x0 == null) return;
-      const dx = e.changedTouches[0].clientX - x0;
-      x0 = null;
-      if (Math.abs(dx) < 40) return;
-      stepPhase(dx < 0 ? 1 : -1);
-    }, { passive: true });
-
-    // Deep link #02-assemble
-    const hash = (location.hash || "").replace(/^#/, "");
-    const m = hash.match(/^(02|03|04|05)-(assemble|grounded|mission)$/);
-    if (m) {
-      todIndex = TODS.findIndex((t) => t.id === m[1]);
-      phaseIndex = PHASES.indexOf(m[2]);
-    }
     render();
   </script>
 </body>
