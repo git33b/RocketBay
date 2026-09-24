@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#000000" />
+  <title>Rocket Bay — stills trial</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; height: 100%; background: #000; color: #fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow: hidden; user-select: none;
+    }
+    #stage {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #000;
+    }
+    #plate {
+      width: 100%; height: 100%;
+      object-fit: contain; object-position: center;
+      background: #000; display: block;
+      touch-action: none;
+    }
+    #chrome {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+      background: linear-gradient(transparent, rgba(0,0,0,.85));
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    #meta {
+      font-size: 11px; letter-spacing: .04em; opacity: .85;
+      text-align: center;
+    }
+    .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+    button {
+      appearance: none; border: 0; border-radius: 6px;
+      padding: 10px 12px; font: inherit; font-size: 12px; font-weight: 700;
+      color: #fff; background: rgba(255,255,255,.14); cursor: pointer;
+    }
+    button.active { background: rgba(255,140,0,.9); }
+    button.phase { min-width: 96px; }
+    button.nav { background: rgba(0,180,220,.35); }
+    #hint {
+      position: fixed; top: 10px; left: 0; right: 0;
+      text-align: center; font-size: 10px; opacity: .55;
+      pointer-events: none; padding-top: env(safe-area-inset-top);
+    }
+  </style>
+</head>
+<body>
+  <div id="hint">swipe ← → phase · pick TOD below</div>
+  <div id="stage"><img id="plate" alt="Rocket Bay still" draggable="false" /></div>
+  <div id="chrome">
+    <div id="meta"></div>
+    <div class="row" id="tods"></div>
+    <div class="row">
+      <button type="button" class="nav" id="prev">◀ PREV</button>
+      <button type="button" class="phase" data-phase="assemble">ASSEMBLE</button>
+      <button type="button" class="phase" data-phase="grounded">GROUNDED</button>
+      <button type="button" class="phase" data-phase="mission">MISSION</button>
+      <button type="button" class="nav" id="next">NEXT ▶</button>
+    </div>
+  </div>
+  <script>
+    const TODS = [
+      { id: "02", label: "SUNRISE", file: "sunrise" },
+      { id: "03", label: "SUNSET", file: "sunset" },
+      { id: "04", label: "NIGHT", file: "night" },
+      { id: "05", label: "DAY", file: "day" },
+    ];
+    const PHASES = ["assemble", "grounded", "mission"];
+    let todIndex = 0;
+    let phaseIndex = 0;
+
+    const plate = document.getElementById("plate");
+    const meta = document.getElementById("meta");
+    const todRow = document.getElementById("tods");
+
+    TODS.forEach((t, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = t.label;
+      b.dataset.tod = String(i);
+      b.addEventListener("click", () => { todIndex = i; render(); });
+      todRow.appendChild(b);
+    });
+
+    function srcFor(tod, phase) {
+      return `plates/${tod.id}-${phase}-${tod.file}.jpg`;
+    }
+
+    function render() {
+      const tod = TODS[todIndex];
+      const phase = PHASES[phaseIndex];
+      const src = srcFor(tod, phase);
+      if (plate.getAttribute("src") !== src) plate.src = src;
+      meta.textContent = `${tod.id} ${tod.label} · ${phase.toUpperCase()} · 1280×720 lock`;
+      [...todRow.children].forEach((b, i) => b.classList.toggle("active", i === todIndex));
+      document.querySelectorAll("button.phase").forEach((b) => {
+        b.classList.toggle("active", b.dataset.phase === phase);
+      });
+      history.replaceState(null, "", `#${tod.id}-${phase}`);
+    }
+
+    function stepPhase(delta) {
+      phaseIndex = (phaseIndex + delta + PHASES.length) % PHASES.length;
+      render();
+    }
+
+    document.getElementById("prev").onclick = () => stepPhase(-1);
+    document.getElementById("next").onclick = () => stepPhase(1);
+    document.querySelectorAll("button.phase").forEach((b) => {
+      b.addEventListener("click", () => {
+        phaseIndex = PHASES.indexOf(b.dataset.phase);
+        render();
+      });
+    });
+
+    // Swipe on plate
+    let x0 = null;
+    const stage = document.getElementById("stage");
+    stage.addEventListener("touchstart", (e) => { x0 = e.changedTouches[0].clientX; }, { passive: true });
+    stage.addEventListener("touchend", (e) => {
+      if (x0 == null) return;
+      const dx = e.changedTouches[0].clientX - x0;
+      x0 = null;
+      if (Math.abs(dx) < 40) return;
+      stepPhase(dx < 0 ? 1 : -1);
+    }, { passive: true });
+
+    // Deep link #02-assemble
+    const hash = (location.hash || "").replace(/^#/, "");
+    const m = hash.match(/^(02|03|04|05)-(assemble|grounded|mission)$/);
+    if (m) {
+      todIndex = TODS.findIndex((t) => t.id === m[1]);
+      phaseIndex = PHASES.indexOf(m[2]);
+    }
+    render();
+  </script>
+</body>
+</html>
