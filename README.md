@@ -1,3 +1,3 @@
-# Rocket Bay
+# Rocket Bay (MVP-1)
 
-Private iOS SpriteKit + SwiftUI rocket builder. Generic App Store labels only.
+Placeholder — will be overwritten by full project README in next push.
