@@ -2,15 +2,11 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
-*.xccheckout
-*.xcscmblueprint
-
-# macOS
-.DS_Store
-**/.DS_Store
-
-# Build
-build/
+*.moved-aside
+*.hmap
 *.ipa
 *.dSYM.zip
 *.dSYM
+.DS_Store
+build/
+*.swp
