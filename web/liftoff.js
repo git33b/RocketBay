@@ -140,6 +140,8 @@
     }
     const plateEl = this.getPlateEl && this.getPlateEl();
     if (plateEl) {
+      plateEl.style.display = "";
+      plateEl.style.visibility = "";
       plateEl.style.opacity = "1";
       plateEl.style.webkitMaskImage = "";
       plateEl.style.maskImage = "";
@@ -147,6 +149,8 @@
     if (this._tallSkyCanvas) {
       this._tallSkyCanvas.style.display = "none";
     }
+    this._fireField = null;
+    this._fireTrail = null;
     const px = this.getParallaxEl();
     if (px) { px.style.display = "none"; }
     this.stopAudio(true);
@@ -158,7 +162,7 @@
     this.raf = 0;
   };
 
-  /* ---------- tall seamless sky (plate + soft palette continuation) ---------- */
+  /* ---------- tall sky: [mirrored extension][exact plate] — sole backdrop in liftoff ---------- */
   LiftoffEngine.prototype.buildTallSky = function () {
     const plate = this.getPlateEl();
     const tod = this.getTodId();
@@ -166,137 +170,180 @@
     if (!plate || !plate.naturalWidth) return null;
     const nw = plate.naturalWidth;
     const nh = plate.naturalHeight;
-    const N = 80;
-    const BLEND = 96;
-    const ext = Math.round(nh * 2.2);
+    const N = 120; // mirror band: top ~120 rows of plate (actual pixels)
+    const FALL = 128; // wide cosine falloff across each tile edge
+    const ext = Math.round(nh * 2.8);
     const c = document.createElement("canvas");
     c.width = nw;
     c.height = nh + ext;
     const ctx = c.getContext("2d", { willReadFrequently: true });
     ctx.imageSmoothingEnabled = false;
+
+    // Exact full plate at bottom of tall canvas
     ctx.drawImage(plate, 0, ext);
 
+    // Capture top N rows as the mirror source (actual plate pixels)
     const band = document.createElement("canvas");
-    band.width = nw; band.height = N;
+    band.width = nw;
+    band.height = N;
     const bctx = band.getContext("2d", { willReadFrequently: true });
     bctx.imageSmoothingEnabled = false;
-    bctx.drawImage(plate, 0, 0, nw, N, 0, 0, nw, N);
-    let bandData = null;
-    try { bandData = bctx.getImageData(0, 0, nw, N).data; } catch (_) {}
+    bctx.drawImage(plate, 0, 0, nw, Math.min(N, nh), 0, 0, nw, N);
+    let bandData;
+    try { bandData = bctx.getImageData(0, 0, nw, N).data; } catch (e) {
+      console.warn("tallSky band read failed", e);
+      bandData = null;
+    }
 
+    // Cloud palette from band for day parallax (optional)
     this._cloudPalette = [[232, 238, 244], [210, 220, 230], [245, 248, 252]];
     if (bandData) {
       const clouds = [];
-      for (let i = 0; i < bandData.length; i += 32) {
-        const r = bandData[i], g = bandData[i+1], b = bandData[i+2], a = bandData[i+3];
-        if (a > 200 && r > 170 && g > 180 && b > 190 && r+g+b > 560) clouds.push([r,g,b]);
+      for (let i = 0; i < bandData.length; i += 28) {
+        const r = bandData[i], g = bandData[i + 1], b = bandData[i + 2], a = bandData[i + 3];
+        if (a > 200 && r > 170 && g > 180 && b > 190 && r + g + b > 560) clouds.push([r, g, b]);
       }
       if (clouds.length) this._cloudPalette = clouds;
     }
 
-    const colR = new Float32Array(nw);
-    const colG = new Float32Array(nw);
-    const colB = new Float32Array(nw);
-    if (bandData) {
-      const rows = Math.min(24, N);
-      for (let x = 0; x < nw; x++) {
-        let r=0,g=0,b=0,n=0;
-        for (let y = 0; y < rows; y++) {
-          const i = (y * nw + x) * 4;
-          r += bandData[i]; g += bandData[i+1]; b += bandData[i+2]; n++;
-        }
-        colR[x]=r/n; colG[x]=g/n; colB[x]=b/n;
+    function parseDeep(col) {
+      if (col && col[0] === "#") {
+        const h = col.slice(1);
+        if (h.length === 3) return [parseInt(h[0]+h[0],16), parseInt(h[1]+h[1],16), parseInt(h[2]+h[2],16)];
+        return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
       }
-      const tmpR=colR.slice(), tmpG=colG.slice(), tmpB=colB.slice();
-      for (let x = 0; x < nw; x++) {
-        let r=0,g=0,b=0,w=0;
-        for (let dx=-8; dx<=8; dx++) {
-          const xx=Math.max(0,Math.min(nw-1,x+dx));
-          const ww=1-Math.abs(dx)/9;
-          r+=tmpR[xx]*ww; g+=tmpG[xx]*ww; b+=tmpB[xx]*ww; w+=ww;
-        }
-        colR[x]=r/w; colG[x]=g/w; colB[x]=b/w;
-      }
-    }
-
-    function parseDeep(c) {
-      if (c && c[0]==="#") {
-        const h=c.slice(1);
-        if (h.length===3) return [parseInt(h[0]+h[0],16),parseInt(h[1]+h[1],16),parseInt(h[2]+h[2],16)];
-        return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
-      }
-      return [6,10,22];
+      return [6, 10, 22];
     }
     const deep = parseDeep(pal.deep);
 
-    const img = ctx.createImageData(nw, ext);
-    const d = img.data;
+    // Fill extension by repeated vertical mirror of band (actual pixels)
+    // Layout: canvas y=0 is deepest space; canvas y=ext-1 is just above plate top.
+    // above=0 ⇒ immediately above plate ⇒ band row 0 (plate top).
+    const extImg = ctx.createImageData(nw, ext);
+    const d = extImg.data;
+    if (bandData) {
+      const maxCycles = 1; // one mirror tile then soft-hold (minimize flip V-seams)
+      for (let y = 0; y < ext; y++) {
+        const above = ext - 1 - y; // 0 at junction
+        let srcRow;
+        if (above < N * maxCycles) {
+          const cycle = (above / N) | 0;
+          const local = above % N;
+          srcRow = (cycle % 2 === 0) ? local : (N - 1 - local);
+        } else {
+          // Hold the last mirrored edge row (actual plate pixels), later deep-grade softens it
+          srcRow = (maxCycles % 2 === 0) ? (N - 1) : 0;
+        }
+        for (let x = 0; x < nw; x++) {
+          const di = (y * nw + x) * 4;
+          const si = (srcRow * nw + x) * 4;
+          d[di] = bandData[si];
+          d[di + 1] = bandData[si + 1];
+          d[di + 2] = bandData[si + 2];
+          d[di + 3] = 255;
+        }
+      }
+      // 64px cosine falloff at each tile boundary (and at plate junction)
+      const boundaries = [];
+      for (let b = 0; b <= ext; b += N) boundaries.push(b); // above-distances
+      // Also blend at plate junction (above=0) is automatic since band row 0 == plate row 0
+      for (let bi = 0; bi < boundaries.length; bi++) {
+        const aboveBound = boundaries[bi];
+        if (aboveBound === 0) continue; // junction already matches plate
+        for (let dy = -FALL; dy <= FALL; dy++) {
+          const above = aboveBound + dy;
+          if (above < 0 || above >= ext) continue;
+          const y = ext - 1 - above;
+          // Mix with neighbor across boundary
+          const above2 = aboveBound - dy;
+          if (above2 < 0 || above2 >= ext) continue;
+          const y2 = ext - 1 - above2;
+          const t = (dy + FALL) / (FALL * 2); // 0..1
+          const wMix = 0.5 - 0.5 * Math.cos(Math.PI * t); // smooth
+          // Soften: pull toward average of the two sides
+          // Full cosine crossfade across the boundary (hides diagonal flip kink)
+          const mix = wMix * (1 - Math.abs(dy) / FALL);
+          for (let x = 0; x < nw; x++) {
+            const i0 = (y * nw + x) * 4;
+            const i1 = (y2 * nw + x) * 4;
+            d[i0] = (d[i0] * (1 - mix) + d[i1] * mix) | 0;
+            d[i0 + 1] = (d[i0 + 1] * (1 - mix) + d[i1 + 1] * mix) | 0;
+            d[i0 + 2] = (d[i0 + 2] * (1 - mix) + d[i1 + 2] * mix) | 0;
+          }
+        }
+      }
+      // Force junction rows (above 0..FALL) to exact plate top so no seam vs plate copy
+      for (let k = 0; k < FALL; k++) {
+        const above = k;
+        const y = ext - 1 - above;
+        const srcRow = Math.min(N - 1, k);
+        const w = 0.5 + 0.5 * Math.cos(Math.PI * (k / FALL)); // 1 at junction → 0
+        for (let x = 0; x < nw; x++) {
+          const di = (y * nw + x) * 4;
+          const si = (srcRow * nw + x) * 4;
+          d[di] = (d[di] * (1 - w) + bandData[si] * w) | 0;
+          d[di + 1] = (d[di + 1] * (1 - w) + bandData[si + 1] * w) | 0;
+          d[di + 2] = (d[di + 2] * (1 - w) + bandData[si + 2] * w) | 0;
+        }
+      }
+    } else {
+      for (let i = 0; i < d.length; i += 4) {
+        d[i] = deep[0]; d[i + 1] = deep[1]; d[i + 2] = deep[2]; d[i + 3] = 255;
+      }
+    }
+
+    // Slow grade to deep space across the upper half of the extension (keep near-junction as plate)
     for (let y = 0; y < ext; y++) {
       const above = ext - 1 - y;
-      const t = clamp(above / (ext * 0.85), 0, 1);
-      const deepW = t < 0.4 ? 0 : (0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.pow((t - 0.4) / 0.6, 1.2))));
-      const juncW = above < BLEND ? (0.5 + 0.5 * Math.cos(Math.PI * (above / BLEND))) : 0;
+      const t = clamp(above / (ext * 0.9), 0, 1);
+      // Keep mirrored plate sky for most of the extension; deep only near the top
+      if (t < 0.55) continue;
+      const u = (t - 0.55) / 0.45;
+      const deepW = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, u));
       for (let x = 0; x < nw; x++) {
         const i = (y * nw + x) * 4;
-        // Mild spatial noise (not per-column streaks)
-        const n = (((x * 13 + y * 7) % 9) - 4) * 0.6;
-        let r = (colR[x] || deep[0]) + n;
-        let g = (colG[x] || deep[1]) + n;
-        let b = (colB[x] || deep[2]) + n;
-        if (bandData && juncW > 0.01) {
-          const srcY = Math.min(N - 1, above);
-          const si = (srcY * nw + x) * 4;
-          r = r * (1 - juncW) + bandData[si] * juncW;
-          g = g * (1 - juncW) + bandData[si+1] * juncW;
-          b = b * (1 - juncW) + bandData[si+2] * juncW;
-        }
-        r = r * (1 - deepW) + deep[0] * deepW;
-        g = g * (1 - deepW) + deep[1] * deepW;
-        b = b * (1 - deepW) + deep[2] * deepW;
-        d[i]=r|0; d[i+1]=g|0; d[i+2]=b|0; d[i+3]=255;
+        d[i] = (d[i] * (1 - deepW) + deep[0] * deepW) | 0;
+        d[i + 1] = (d[i + 1] * (1 - deepW) + deep[1] * deepW) | 0;
+        d[i + 2] = (d[i + 2] * (1 - deepW) + deep[2] * deepW) | 0;
       }
     }
+
+    // Sparse stars only in deep (far from junction)
     if (pal.parallax === "night" || pal.parallax === "dusk" || pal.parallax === "dawn") {
-      for (let i = 0; i < 260; i++) {
+      for (let i = 0; i < 200; i++) {
         const x = (this._rand() * nw) | 0;
-        const y = (this._rand() * Math.max(1, ext - BLEND - 20)) | 0;
+        const y = (this._rand() * Math.max(1, ext * 0.55)) | 0;
         const di = (y * nw + x) * 4;
-        const a = 0.4 + this._rand() * 0.6;
-        d[di] = Math.min(255, d[di] + ((200 * a)|0));
-        d[di+1] = Math.min(255, d[di+1] + ((220 * a)|0));
-        d[di+2] = Math.min(255, d[di+2] + ((255 * a)|0));
+        const a = 0.35 + this._rand() * 0.55;
+        d[di] = Math.min(255, d[di] + ((210 * a) | 0));
+        d[di + 1] = Math.min(255, d[di + 1] + ((225 * a) | 0));
+        d[di + 2] = Math.min(255, d[di + 2] + ((255 * a) | 0));
       }
     }
-    ctx.putImageData(img, 0, 0);
-    // Exact plate-top copy for first BLEND rows above junction (bit-identical → no seam)
-    if (bandData) {
-      const jimg = ctx.getImageData(0, ext - BLEND, nw, BLEND);
-      const jd = jimg.data;
-      for (let above = 0; above < BLEND; above++) {
-        const srcY = Math.min(N - 1, above);
-        const y = BLEND - 1 - above; // in jimg: 0 = farthest from plate, BLEND-1 = junction
-        // Actually jimg row 0 is canvas y=(ext-BLEND), which is BLEND px above junction
-        // canvas y = ext-1-above for "above" distance from plate
-        // We want canvas rows [ext-BLEND .. ext-1] = plate rows [BLEND-1 .. 0] mirrored softly
-        // Bit-identical: canvas y=(ext-1-k) = plate row k for k in 0..BLEND-1
-      }
-      for (let k = 0; k < BLEND; k++) {
-        const canvasY = ext - 1 - k; // k=0 junction-adjacent
-        const srcY = Math.min(N - 1, k);
-        const row = canvasY - (ext - BLEND); // index in jimg
+
+    ctx.putImageData(extImg, 0, 0);
+
+    // Bit-identical junction: copy exact plate rows (already drawn at y=ext+) into extension bottom
+    try {
+      const plateTop = ctx.getImageData(0, ext, nw, Math.min(FALL, nh));
+      const jH = Math.min(FALL, plateTop.height);
+      const junc = ctx.getImageData(0, ext - jH, nw, jH);
+      for (let k = 0; k < jH; k++) {
+        // plate row k → extension row just above plate (k=0 at junction)
+        const srcOff = k * nw * 4;
+        const dstOff = (jH - 1 - k) * nw * 4;
+        const w = 0.5 + 0.5 * Math.cos(Math.PI * (k / Math.max(1, jH - 1))); // 1 at junction
         for (let x = 0; x < nw; x++) {
-          const di = (row * nw + x) * 4;
-          const si = (srcY * nw + x) * 4;
-          // Ease from exact plate (k=0) toward already-filled soft color (k→BLEND)
-          const w = 0.5 + 0.5 * Math.cos(Math.PI * (k / BLEND)); // 1 at junction → 0 at BLEND
-          jd[di] = (jd[di] * (1 - w) + bandData[si] * w) | 0;
-          jd[di+1] = (jd[di+1] * (1 - w) + bandData[si+1] * w) | 0;
-          jd[di+2] = (jd[di+2] * (1 - w) + bandData[si+2] * w) | 0;
-          jd[di+3] = 255;
+          const si = srcOff + x * 4;
+          const di = dstOff + x * 4;
+          junc.data[di] = (junc.data[di] * (1 - w) + plateTop.data[si] * w) | 0;
+          junc.data[di + 1] = (junc.data[di + 1] * (1 - w) + plateTop.data[si + 1] * w) | 0;
+          junc.data[di + 2] = (junc.data[di + 2] * (1 - w) + plateTop.data[si + 2] * w) | 0;
+          junc.data[di + 3] = 255;
         }
       }
-      ctx.putImageData(jimg, 0, ext - BLEND);
-    }
+      ctx.putImageData(junc, 0, ext - jH);
+    } catch (_) {}
 
     this._tallSky = c;
     this._tallSkyExt = ext;
@@ -310,8 +357,7 @@
     const lb = this._lb;
     if (!tall || !lb) return;
 
-    // Mount FIXED on #stage (not inside #world) — pan via source-rect so no top gap/seam
-    const stage = document.getElementById("stage") || (this.getSkyEl && this.getSkyEl());
+    const stage = document.getElementById("stage");
     if (!stage) return;
 
     let canvas = this._tallSkyCanvas;
@@ -319,11 +365,7 @@
       canvas = document.createElement("canvas");
       canvas.id = "tallSky";
       canvas.setAttribute("aria-hidden", "true");
-      canvas.style.position = "absolute";
-      canvas.style.pointerEvents = "none";
-      canvas.style.imageRendering = "pixelated";
-      canvas.style.zIndex = "0";
-      // Behind world (world is z-index 1)
+      canvas.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;image-rendering:pixelated;z-index:0;";
       const world = this.getWorldEl && this.getWorldEl();
       if (world && world.parentElement === stage) stage.insertBefore(canvas, world);
       else stage.insertBefore(canvas, stage.firstChild);
@@ -331,49 +373,41 @@
     }
 
     const dpr = this._dpr || 1;
-    const cw = Math.max(1, Math.round(this._wrapW * dpr));
-    const ch = Math.max(1, Math.round(this._wrapH * dpr));
+    const wrapW = this._wrapW || lb.width;
+    const wrapH = this._wrapH || lb.height;
+    const cw = Math.max(1, Math.round(wrapW * dpr));
+    const ch = Math.max(1, Math.round(wrapH * dpr));
     if (canvas.width !== cw || canvas.height !== ch) {
       canvas.width = cw;
       canvas.height = ch;
     }
-    canvas.style.left = "0px";
-    canvas.style.top = "0px";
-    canvas.style.width = this._wrapW + "px";
-    canvas.style.height = this._wrapH + "px";
+    canvas.style.width = wrapW + "px";
+    canvas.style.height = wrapH + "px";
     canvas.style.display = "block";
 
-    // Source-rect slides with camera. Viewport shows the same cover window as plateMap.
-    // Plate sits at tallY=[ext .. ext+nh). Viewport top in plate-space is -lb.top (css).
+    // Source-rect: single bitmap follows camera. Plate is HIDDEN — tall sky owns pad+sky.
     const ext = this._tallSkyExt;
-    const nh = this._tallSkyNh;
     const nw = this._tallSkyNw;
     const scaleY = lb.nh / lb.height;
     const scaleX = nw / lb.width;
-    // Plate-local css Y of viewport top, then +camY (world moved down ⇒ look higher on plate)
+    // Viewport top in plate-local css, accounting for world camY (world moves down ⇒ look higher)
     const viewTopPlateCss = -lb.top - (this.camY || 0);
     let srcY = ext + viewTopPlateCss * scaleY;
-    const srcH = this._wrapH * scaleY;
-    const viewLeftPlateCss = -lb.left;
-    let srcX = viewLeftPlateCss * scaleX;
-    const srcW = this._wrapW * scaleX;
+    const srcH = wrapH * scaleY;
+    let srcX = (-lb.left) * scaleX;
+    const srcW = wrapW * scaleX;
     if (srcX < 0) srcX = 0;
     if (srcX + srcW > nw) srcX = Math.max(0, nw - srcW);
 
     const ctx = canvas.getContext("2d");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    // Deep fill first — if source runs past top of tall sky, no black/streak gap
     const pal = TOD_GLOW[this.getTodId()] || TOD_GLOW["05"];
     ctx.fillStyle = pal.deep || "#050814";
     ctx.fillRect(0, 0, cw, ch);
 
-    if (srcY + srcH <= 0) {
-      // fully above tall sky — deep fill only
-    } else {
-      let dy = 0;
-      let sy = srcY;
-      let sh = srcH;
+    if (srcY + srcH > 0) {
+      let dy = 0, sy = srcY, sh = srcH;
       if (sy < 0) {
         const skip = -sy;
         dy = (skip / srcH) * ch;
@@ -382,37 +416,38 @@
       }
       if (sy + sh > tall.height) sh = tall.height - sy;
       if (sh > 0) {
-        const dh = (sh / srcH) * ch;
-        ctx.drawImage(tall, srcX, sy, srcW, sh, 0, dy, cw, dh);
+        ctx.drawImage(tall, srcX, sy, srcW, sh, 0, dy, cw, (sh / srcH) * ch);
       }
     }
 
+    // Hide plate completely during liftoff — no scrolling plate edge against extension
     const plate = this.getPlateEl && this.getPlateEl();
     if (plate) {
+      plate.style.display = "none";
+      plate.style.visibility = "hidden";
       plate.style.opacity = "0";
       plate.style.webkitMaskImage = "";
       plate.style.maskImage = "";
     }
     const sky = this.getSkyEl && this.getSkyEl();
     if (sky) { sky.style.opacity = "0"; sky.innerHTML = ""; sky._skyCanvas = null; }
-
-    // Hide parallax — tall sky owns backdrop; parallax was a second seam source
     const px = this.getParallaxEl && this.getParallaxEl();
     if (px) { px.style.display = "none"; }
   };
 
   LiftoffEngine.prototype.updateTallSkyPan = function () {
-    // Re-blit sliding source-rect each frame during climb
-    if (!this._tallSky || !this._tallSkyCanvas || !this._lb) return;
+    if (!this._tallSky || !this._lb) return;
     this.drawTallSky();
   };
 
   LiftoffEngine.prototype.clearTallSky = function () {
-    if (this._tallSkyCanvas) {
-      this._tallSkyCanvas.style.display = "none";
-    }
+    if (this._tallSkyCanvas) this._tallSkyCanvas.style.display = "none";
     const plate = this.getPlateEl && this.getPlateEl();
-    if (plate) plate.style.opacity = "1";
+    if (plate) {
+      plate.style.display = "";
+      plate.style.visibility = "";
+      plate.style.opacity = "1";
+    }
   };
 
   LiftoffEngine.prototype._rgba = function (c, a) {
@@ -837,12 +872,16 @@
     const str = this.flameIntensity * flick * (0.5 + this.releaseFlash * 1.5);
     const gw = Math.max(20, (seat.width || 100) / this._lb.nw * this._lb.width * bs * 1.8);
     bctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 5; i++) {
-      bctx.globalAlpha = str * (1 - i / 5) * 0.35;
+    // Soft disc glow — avoid hard horizontal bars that read as flame geometry
+    const rings = this.phase === "climb" ? 3 : 5;
+    for (let i = 0; i < rings; i++) {
+      bctx.globalAlpha = str * (1 - i / rings) * (this.phase === "climb" ? 0.18 : 0.32);
       bctx.fillStyle = pal.pad;
-      const y = Math.round(by + i * 2);
-      const w = Math.round(gw + i * 6);
-      bctx.fillRect(Math.round(bx - w / 2), y, w, 2);
+      const rr = Math.round((gw * 0.35) + i * 3);
+      for (let dy = -rr; dy <= rr; dy++) {
+        const span = Math.sqrt(Math.max(0, 1 - (dy * dy) / (rr * rr))) * rr;
+        bctx.fillRect(Math.round(bx - span), Math.round(by + dy * 0.45), Math.round(span * 2), 1);
+      }
     }
     // release bloom — soft pixel disc, not a hard rectangle
     if (this.releaseFlash > 0.05) {
@@ -887,91 +926,199 @@
     }
   };
 
+  /* ---------- classic cellular pixel fire ---------- */
+  LiftoffEngine.prototype._ensureFireField = function (fw, fh) {
+    if (!this._fireField || this._fireField.w !== fw || this._fireField.h !== fh) {
+      this._fireField = {
+        w: fw, h: fh,
+        buf: new Uint8Array(fw * fh),
+        canvas: document.createElement("canvas"),
+        img: null,
+      };
+      this._fireField.canvas.width = fw;
+      this._fireField.canvas.height = fh;
+      this._fireField.img = this._fireField.canvas.getContext("2d").createImageData(fw, fh);
+    }
+    return this._fireField;
+  };
+
+  LiftoffEngine.prototype._ensureTrailField = function (fw, fh) {
+    if (!this._fireTrail || this._fireTrail.w !== fw || this._fireTrail.h !== fh) {
+      this._fireTrail = {
+        w: fw, h: fh,
+        buf: new Uint8Array(fw * fh),
+        canvas: document.createElement("canvas"),
+        img: null,
+      };
+      this._fireTrail.canvas.width = fw;
+      this._fireTrail.canvas.height = fh;
+      this._fireTrail.img = this._fireTrail.canvas.getContext("2d").createImageData(fw, fh);
+    }
+    return this._fireTrail;
+  };
+
+  // Doom-style fire: seed row 0 (nozzle), propagate to higher rows (down the plume)
+  LiftoffEngine.prototype._tickFire = function (field, seedHalf, heat) {
+    const w = field.w, h = field.h, buf = field.buf;
+    const cx = (w / 2) | 0;
+    // Seed nozzle rows with noisy hot values (no solid bar — broken edges)
+    for (let x = 0; x < w; x++) {
+      const d = Math.abs(x - cx);
+      let v = 0;
+      if (d <= seedHalf) {
+        const t = 1 - d / Math.max(1, seedHalf);
+        // Soft gaussian-ish, lots of nozzle noise — avoid a hard bar
+        const fall = t * t;
+        v = Math.round(heat * fall * (0.5 + this._rand() * 0.5));
+        if (t < 0.35 && this._rand() < 0.45) v = 0;
+        else if (this._rand() < 0.12) v = Math.round(v * (0.2 + this._rand() * 0.5));
+        if (t > 0.7 && this._rand() < 0.25) v = heat; // hot sparks in core
+      } else if (d <= seedHalf + 3 && this._rand() < 0.25) {
+        v = Math.round(heat * 0.2 * this._rand());
+      }
+      buf[x] = v;
+      if (h > 1) buf[w + x] = Math.max(0, v - ((this._rand() * 4) | 0));
+    }
+    // Propagate downward (row y samples from row y-1)
+    for (let y = 2; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const rnd = (this._rand() * 3) | 0; // 0..2 classic
+        const srcX = clamp(x + (rnd - 1), 0, w - 1);
+        const from = buf[(y - 1) * w + srcX];
+        // Cool slowly so plume fills the buffer (not just a nozzle bar)
+        let next = from - (rnd > 1 ? 1 : 0);
+        if (this._rand() < 0.04 && from > 18) next = Math.min(36, from + 3);
+        if (this._rand() < 0.03) next = Math.max(0, next - 1);
+        buf[y * w + x] = next > 0 ? next : 0;
+      }
+    }
+  };
+
+  LiftoffEngine.prototype._paintFireBuf = function (field, pal) {
+    const w = field.w, h = field.h, buf = field.buf, data = field.img.data;
+    // 37-step fire palette white→yellow→orange→red→dark→transparent
+    const ramp = [];
+    function lerp3(a, b, t) {
+      return [(a[0]+(b[0]-a[0])*t)|0, (a[1]+(b[1]-a[1])*t)|0, (a[2]+(b[2]-a[2])*t)|0];
+    }
+    const stops = [
+      [0, 0, 0],
+      [40, 8, 0],
+      [120, 20, 0],
+      [200, 40, 0],
+      [255, 90, 10],
+      [255, 160, 30],
+      [255, 220, 80],
+      [255, 255, 200],
+      [255, 255, 255],
+    ];
+    for (let i = 0; i <= 36; i++) {
+      const t = i / 36;
+      const seg = t * (stops.length - 1);
+      const i0 = Math.min(stops.length - 2, seg | 0);
+      const f = seg - i0;
+      const c = lerp3(stops[i0], stops[i0 + 1], f);
+      const a = i < 2 ? 0 : Math.min(255, 40 + i * 7);
+      ramp.push([c[0], c[1], c[2], a]);
+    }
+    // Prefer palette endpoints if provided
+    const pf = pal.flame || [];
+    // paint
+    // Clear
+    for (let i = 0; i < data.length; i++) data[i] = 0;
+    // Paint with per-row horizontal warp for tongue flicker
+    for (let y = 0; y < h; y++) {
+      const warp = ((Math.sin(y * 0.41 + this._simTime * 11.0) * 1.6)
+        + (Math.sin(y * 0.17 + this._simTime * 6.2) * 1.1)) | 0;
+      for (let x = 0; x < w; x++) {
+        let v = buf[y * w + x];
+        if (v > 36) v = 36;
+        if (v <= 0) continue;
+        const dx = clamp(x + warp, 0, w - 1);
+        const c = ramp[v];
+        const pi = (y * w + dx) * 4;
+        if (v < 9 && ((x * 13 + y + v) & 3) === 0) continue; // broken edge
+        data[pi] = Math.max(data[pi], c[0]);
+        data[pi + 1] = Math.max(data[pi + 1], c[1]);
+        data[pi + 2] = Math.max(data[pi + 2], c[2]);
+        data[pi + 3] = Math.max(data[pi + 3], c[3]);
+      }
+    }
+    field.canvas.getContext("2d").putImageData(field.img, 0, 0);
+  };
+
   LiftoffEngine.prototype.drawFlameDisplay = function (ctx, seat, pal) {
-    // Rasterized tapered spine at 2px grid (solid fill, edge flicker only)
     const lb = this._lb;
     const nz = this.nozzleNative(seat);
     const nozzles = seat.nozzles && seat.nozzles.length ? seat.nozzles : [0];
     const stageW = Math.max(80, seat.width || 120);
     const stackH = Math.max(stageW * 4, (seat.targetH || 420));
     const grow = clamp(this.flameIntensity, 0.25, 1.5);
-    let lenN;
-    if (this.phase === "climb") lenN = stackH * (3.0 + grow * 0.5 + Math.min(1.2, this.climbT) * 0.4);
-    else if (this.phase === "hold") lenN = stackH * (1.5 + grow * 0.35);
-    else lenN = stackH * (0.9 + grow * 0.35);
-    const flickL = 1 + (this._rand() - 0.5) * 0.24;
-    const flickW = 1 + (this._rand() - 0.5) * 0.16;
-    const baseWN = stageW * (1.75 + 0.3 * grow) * flickW;
-    const CELL = 1; // 1 CSS px grid — finer than mosaic blocks
 
-    const heat = pal.flame || ["#ffffff", "#fff078", "#ffaa28", "#ff4a14", "#c01e55"];
+    // 2–3 CSS px per fire cell
+    const CELL = 1.5;
+    let lenMul;
+    if (this.phase === "climb") lenMul = 2.6 + grow * 0.5 + Math.min(1.2, this.climbT) * 0.55;
+    else if (this.phase === "hold") lenMul = 1.35 + grow * 0.3;
+    else lenMul = 0.8 + grow * 0.35;
 
-    const stamp = (ox, oy, lenCss, baseWCss, ang, alphaScale) => {
-      const cosA = Math.cos(ang), sinA = Math.sin(ang);
-      const rows = Math.max(8, Math.round(lenCss / CELL));
-      const baseHalf = Math.max(CELL, baseWCss / 2);
-      for (let row = 0; row < rows; row++) {
-        const t = row / (rows - 1 || 1);
-        // Sharp taper to 1–2px tip
-        let half = baseHalf * Math.pow(1 - t, 1.05);
-        if (t > 0.92) half = Math.max(1, half);
-        half = Math.max(1, half);
-        const cx = ox + sinA * row * CELL;
-        const cy = oy + cosA * row * CELL;
-        const span = Math.max(1, Math.ceil(half / CELL));
-        for (let k = -span; k <= span; k++) {
-          const xOff = k * CELL;
-          const edge = span <= 0 ? 0 : Math.abs(k) / span;
-          // Core solid; sparse fringe missing only at outermost
-          if (edge > 0.9 && this._rand() < 0.35) continue;
-          let ci;
-          if (edge < 0.2) ci = 0;
-          else if (edge < 0.45) ci = 1;
-          else if (edge < 0.75) ci = 2;
-          else if (edge < 0.92) ci = 3;
-          else ci = 4;
-          if (t > 0.7 && ci < 3) ci++;
-          if (t > 0.88 && ci < 4) ci++;
-          const px = cx + cosA * xOff;
-          const py = cy - sinA * xOff;
-          ctx.globalAlpha = alphaScale * grow * (0.7 + (1 - t) * 0.3) * (1 - edge * 0.12);
-          ctx.fillStyle = heat[Math.min(4, ci)];
-          ctx.fillRect(Math.round(px / CELL) * CELL, Math.round(py / CELL) * CELL, CELL, CELL);
-        }
-      }
-    };
+    const lenCss = Math.min(
+      (stackH * lenMul / lb.nh) * lb.height,
+      Math.max(64, (this._wrapH || 390) - 20)
+    );
+    const baseCss = (stageW * (1.7 + 0.35 * grow) / lb.nw) * lb.width;
+    const fw = Math.max(28, Math.round(baseCss / CELL));
+    const fh = Math.max(40, Math.round(lenCss / CELL));
+    const field = this._ensureFireField(fw, fh);
+
+    const heat = 36; // full-hot seed; cool handles length
+    const seedHalf = Math.max(5, Math.round(fw * 0.48));
+    // One tick per frame — double-tick was over-cooling into a flat nozzle bar
+    this._tickFire(field, seedHalf, heat);
+    this._paintFireBuf(field, pal);
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = "lighter";
+
+    const blit = (cssX, cssY, scale, alpha) => {
+      const dw = field.w * CELL * scale;
+      const dh = field.h * CELL * scale;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(field.canvas, Math.round(cssX - dw / 2), Math.round(cssY), Math.round(dw), Math.round(dh));
+    };
+
     for (let ni = 0; ni < nozzles.length; ni++) {
       const isSide = nozzles.length > 1 && nozzles[ni] !== 0;
-      const sc = isSide ? 0.38 : 1;
+      const sc = isSide ? 0.42 : 1;
       const css = this.cssFromNative(nz.x + nozzles[ni], nz.y);
-      let lenCss = (lenN * flickL * sc / lb.nh) * lb.height;
-      // Keep tip on-screen so taper reads (not a clipped wide rectangle)
-      const maxLen = Math.max(48, (this._wrapH || 390) - css.y - 6);
-      if (lenCss > maxLen) lenCss = maxLen;
-      const baseWCss = (baseWN * sc / lb.nw) * lb.width;
-      // Base width ≤ ~0.55 of length so silhouette is a clear taper
-      const maxBase = lenCss * 0.7;
-      const bw = Math.min(baseWCss, maxBase);
-      stamp(css.x, css.y, lenCss, bw, 0, isSide ? 0.65 : 1);
-      if (!isSide) {
-        stamp(css.x, css.y, lenCss * 0.62, bw * 0.38, (15 * Math.PI) / 180, 0.42);
-        stamp(css.x, css.y, lenCss * 0.62, bw * 0.38, (-15 * Math.PI) / 180, 0.42);
-      }
+      blit(css.x, css.y, sc, isSide ? 0.75 : 1);
     }
-    if (this.phase === "climb" && this.climbT < 2.8) {
+
+    // Exhaust trail toward pad — cooler, faster decay
+    if (this.phase === "climb" && this.climbT < 2.6) {
       const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
       const css = this.cssFromNative(nz.x, nz.y);
       const padCssY = lb.top + (deckY / lb.nh) * lb.height;
-      const trailLen = Math.max(8, padCssY - css.y);
-      const fade = clamp(1 - this.climbT / 2.5, 0, 1);
-      if (fade > 0.05 && trailLen > 4) {
-        stamp(css.x, css.y, trailLen * 0.9, (stageW * 0.42 / lb.nw) * lb.width, 0, 0.35 * fade);
+      const trailLen = Math.max(16, padCssY - css.y);
+      const fade = clamp(1 - this.climbT / 2.4, 0, 1);
+      if (fade > 0.06 && trailLen > 10) {
+        const tw = Math.max(14, Math.round(fw * 0.45));
+        const th = Math.max(28, Math.round(trailLen / CELL));
+        const trail = this._ensureTrailField(tw, th);
+        this._tickFire(trail, Math.round(tw * 0.35), Math.round(heat * 0.65));
+        this._paintFireBuf(trail, pal);
+        ctx.globalAlpha = 0.5 * fade;
+        ctx.drawImage(
+          trail.canvas,
+          Math.round(css.x - (tw * CELL) / 2),
+          Math.round(css.y),
+          Math.round(tw * CELL),
+          Math.round(trailLen)
+        );
       }
     }
+
     ctx.restore();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -1122,7 +1269,9 @@
         "translate3d(" + this._shakeX.toFixed(2) + "px," + (this.camY + this._shakeY).toFixed(2) + "px,0)";
     }
     this.applyRocketLight();
-    if (this.camY > 0 || this.phase === "climb" || this.phase === "hold") this.updateTallSkyPan();
+    if (this.ignited || this.phase === "climb" || this.phase === "hold" || this.phase === "linger" || this.phase === "burn") {
+      this.updateTallSkyPan();
+    }
   };
 
   LiftoffEngine.prototype.updateCountdown = function (elapsed) {
@@ -1165,7 +1314,7 @@
         ignited: this.ignited, released: this.released,
         rocketY: this.rocketY, camY: this.camY, climbT: this.climbT,
         lingerT: this.lingerT, flame: this.flameIntensity,
-        app: "liftoff36",
+        app: "liftoff41",
       };
     } catch (_) {}
 
@@ -1277,7 +1426,7 @@
       global.__liftoffState = {
         elapsed: 0, phase: this.phase, countdown: 5,
         ignited: false, released: false, rocketY: 0, camY: 0,
-        climbT: 0, lingerT: 0, flame: 0, app: "liftoff36",
+        climbT: 0, lingerT: 0, flame: 0, app: "liftoff41",
       };
     } catch (_) {}
     if (!this.captureMode) {
