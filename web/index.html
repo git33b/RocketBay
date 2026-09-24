@@ -33,6 +33,9 @@
       image-rendering: auto;
       display: none;
       transform-origin: 50% 100%;
+      /* never translucent / blended — flames may keep screen */
+      opacity: 1;
+      mix-blend-mode: normal;
     }
     #stack.on { display: block; }
     #stack.liftoff {
@@ -176,6 +179,8 @@
     const NATIVE_W = 1280, NATIVE_H = 720;
     const SIT_Y = 548, TARGET_H = 500;
     const CX = { "02": 556, "03": 685, "04": 717, "05": 634 };
+    const KIT_VER = "compose2";
+    const PAD_VER = "compose2";
 
     const TODS = [
       { id: "02", label: "SUNRISE", file: "sunrise", hourHint: [6, 7, 8] },
@@ -211,12 +216,11 @@
       todIndex: 0,
       phase: "assemble",
       tab: "s1",
-      // Default wider stack (Steel Booster+Ship) to occlude empty-pad smear
       selected: {
-        s1: PARTS.s1[0], // Moon Giant
+        s1: PARTS.s1[0],
         s2: PARTS.s2[0],
         payload: PARTS.payload[0],
-        boosters: PARTS.boosters[1], // Steel Booster
+        boosters: null, // start without steel so s1 is visible; user can pick Steel
       },
       missionChoice: null,
     };
@@ -242,7 +246,11 @@
       if (imgCache.has(src)) return imgCache.get(src);
       const p = new Promise((resolve, reject) => {
         const im = new Image();
-        im.onload = () => resolve(im);
+        im.decoding = "async";
+        im.onload = async () => {
+          try { if (im.decode) await im.decode(); } catch (_) {}
+          resolve(im);
+        };
         im.onerror = () => reject(new Error("fail " + src));
         im.src = src;
       });
@@ -284,29 +292,34 @@
     function plateSrc() {
       const tod = TODS[state.todIndex];
       if (usesEmptyPad()) {
-        return `plates/empty/${tod.id}-empty-pad.jpg?v=compose1`;
+        // CoE PASS empty-pad-v2 PNG (never grounded/assemble baked rocket)
+        return `plates/empty/${tod.id}-empty-pad-v2.png?v=${PAD_VER}`;
       }
-      // mission / outcome — existing mission stills
       return `plates/${tod.id}-mission-${tod.file}.jpg`;
     }
 
     function kitSrc(partId) {
       const tod = TODS[state.todIndex].id;
-      // tray always prefers lit; fallback opaque root
-      return `kit/opaque/lit/${tod}/${partId}.png`;
+      return `kit/opaque/lit/${tod}/${partId}.png?v=${KIT_VER}`;
     }
 
     function opaqueSrc(partId) {
       const tod = TODS[state.todIndex].id;
-      return `kit/opaque/lit/${tod}/${partId}.png`;
+      return `kit/opaque/lit/${tod}/${partId}.png?v=${KIT_VER}`;
     }
 
     function canLaunch() {
       return !!(state.selected.s1 && state.selected.s2 && state.selected.payload);
     }
 
+    function hasAnyParts() {
+      const s = state.selected;
+      return !!(s.s1 || s.s2 || s.payload || s.boosters);
+    }
+
     function stackSummary() {
       const s = state.selected;
+      if (!hasAnyParts()) return "Select parts";
       const bits = [s.s1?.name || "—", s.s2?.name || "—", s.payload?.name || "—"];
       let line = bits.join(" / ");
       if (s.boosters) {
@@ -325,7 +338,6 @@
       const scale = Math.min(cw / nw, ch / nh);
       const dw = nw * scale;
       const dh = nh * scale;
-      // plate is centered in plateWrap via flex; letterbox is inside the img box
       const plateOffX = plate.offsetLeft;
       const plateOffY = plate.offsetTop;
       const left = plateOffX + (cw - dw) / 2;
@@ -333,17 +345,76 @@
       return { left, top, width: dw, height: dh, scale, nw, nh };
     }
 
-    function drawScaled(ctx, img, dx, dy, dw, dh) {
-      ctx.drawImage(img, dx, dy, dw, dh);
+    /** Opaque-alpha content bbox of an Image/canvas (source pixels). */
+    function contentBBox(img) {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0);
+      let data;
+      try { data = ctx.getImageData(0, 0, w, h).data; }
+      catch { return { x0: 0, y0: 0, x1: w - 1, y1: h - 1, cw: w, ch: h }; }
+      let x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (data[(y * w + x) * 4 + 3] > 8) {
+            if (x < x0) x0 = x;
+            if (y < y0) y0 = y;
+            if (x > x1) x1 = x;
+            if (y > y1) y1 = y;
+          }
+        }
+      }
+      if (x1 < 0) return { x0: 0, y0: 0, x1: w - 1, y1: h - 1, cw: w, ch: h };
+      return { x0, y0, x1, y1, cw: x1 - x0 + 1, ch: y1 - y0 + 1 };
     }
 
-    async function buildStackCanvas(nativeW, nativeH) {
-      // Compose selected rocket into a native-resolution offscreen canvas
+    /** Draw sprite so content bottom sits on sitY and content height ≈ targetH. */
+    function drawSeated(ctx, img, cx, sitY, targetH) {
+      const bb = contentBBox(img);
+      const scale = targetH / bb.ch;
+      const dw = bb.cw * scale;
+      const dh = bb.ch * scale;
+      const dx = cx - dw / 2;
+      const dy = sitY - dh; // content bottom == sitY
+      ctx.drawImage(
+        img,
+        bb.x0, bb.y0, bb.cw, bb.ch,
+        Math.round(dx), Math.round(dy), Math.round(dw), Math.round(dh)
+      );
+      return { dx: Math.round(dx), dy: Math.round(dy), dw: Math.round(dw), dh: Math.round(dh), bb, scale };
+    }
+
+    let composeToken = 0;
+
+    function clearStackOverlay() {
+      composeToken++;
+      stackEl.classList.remove("on", "liftoff");
+      stackEl.style.display = "none";
+      stackEl.style.transform = "";
+      stackEl.style.opacity = "";
+      // wipe bitmap synchronously so late draws can't leave a ghost
+      try {
+        const w = stackEl.width;
+        stackEl.width = w; // reset clears
+        const ctx = stackEl.getContext("2d");
+        if (ctx) ctx.clearRect(0, 0, stackEl.width, stackEl.height);
+      } catch (_) {}
+      stackEl.width = 1;
+      stackEl.height = 1;
+    }
+
+    async function buildStackCanvas(nativeW, nativeH, token) {
       const off = document.createElement("canvas");
       off.width = nativeW;
       off.height = nativeH;
       const ctx = off.getContext("2d");
       ctx.clearRect(0, 0, nativeW, nativeH);
+      // never use globalAlpha
+      ctx.globalAlpha = 1;
 
       const tod = TODS[state.todIndex].id;
       const cx = CX[tod];
@@ -356,47 +427,50 @@
         try {
           return await loadImage(opaqueSrc(id));
         } catch {
-          return await loadImage(`kit/opaque/${id}.png`);
+          return await loadImage(`kit/opaque/${id}.png?v=${KIT_VER}`);
         }
       }
 
-      // --- Steel Booster + Steel Ship (configs proof pattern) ---
-      if (boost?.id === "steel-booster") {
-        // Prefer precomposed stack sprite when present (wider, cleaner sit)
+      if (token !== composeToken) return null;
+
+      // --- Steel mode: only when steel-booster selected AND s1 is null ---
+      // (mutual exclusion enforced on pick; this is a safety net)
+      if (boost?.id === "steel-booster" && !sel.s1) {
         let pre = null;
         try { pre = await getPart("steel-booster-ship"); } catch (_) {}
+        if (token !== composeToken) return null;
         if (pre) {
-          const pw = Math.round(pre.naturalWidth * (targetH / pre.naturalHeight));
-          const x = Math.round(cx - pw / 2);
-          const y = Math.round(sitY - targetH);
-          ctx.drawImage(pre, x, y, pw, targetH);
+          drawSeated(ctx, pre, cx, sitY, targetH);
           return off;
         }
         const booster = await getPart("steel-booster");
+        if (token !== composeToken) return null;
         let ship;
         try { ship = await getPart("steel-ship"); }
-        catch { ship = await loadImage("kit/opaque/steel-ship.png"); }
+        catch { ship = await loadImage(`kit/opaque/steel-ship.png?v=${KIT_VER}`); }
+        if (token !== composeToken) return null;
 
-        const stack = document.createElement("canvas");
+        // Compose booster+ship into temp then seat by content bbox
+        const tmp = document.createElement("canvas");
         const bhFrac = 0.62, shFrac = 0.46;
         const bh = Math.round(targetH * bhFrac);
         const sh = Math.round(targetH * shFrac);
-        const bw = Math.round(booster.naturalWidth * (bh / booster.naturalHeight));
-        const sw = Math.round(ship.naturalWidth * (sh / ship.naturalHeight));
+        const bbb = contentBBox(booster);
+        const sbb = contentBBox(ship);
+        const bw = Math.round(bbb.cw * (bh / bbb.ch));
+        const sw = Math.round(sbb.cw * (sh / sbb.ch));
         const cw = Math.max(bw, sw) + 4;
-        stack.width = cw;
-        stack.height = targetH;
-        const sctx = stack.getContext("2d");
-        sctx.drawImage(booster, (cw - bw) / 2, targetH - bh, bw, bh);
-        sctx.drawImage(ship, (cw - sw) / 2, 0, sw, sh);
-
-        const x = Math.round(cx - cw / 2);
-        const y = Math.round(sitY - targetH);
-        ctx.drawImage(stack, x, y);
+        tmp.width = cw;
+        tmp.height = targetH;
+        const sctx = tmp.getContext("2d");
+        sctx.globalAlpha = 1;
+        sctx.drawImage(booster, bbb.x0, bbb.y0, bbb.cw, bbb.ch, (cw - bw) / 2, targetH - bh, bw, bh);
+        sctx.drawImage(ship, sbb.x0, sbb.y0, sbb.cw, sbb.ch, (cw - sw) / 2, 0, sw, sh);
+        drawSeated(ctx, tmp, cx, sitY, targetH);
         return off;
       }
 
-      // --- Core body from s1 (or fallbacks) ---
+      // --- Core body from s1 (Moon Giant / Pencil Core) — never overridden by steel ---
       let coreId = sel.s1?.id || null;
       if (!coreId && boost?.id === "gridfin-booster") coreId = "gridfin-booster";
       if (!coreId && sel.s2) coreId = sel.s2.id;
@@ -404,85 +478,77 @@
       if (!coreId) return off;
 
       const core = await getPart(coreId);
-      let coreW = Math.round(core.naturalWidth * (targetH / core.naturalHeight));
-      let coreH = targetH;
+      if (token !== composeToken) return null;
 
-      // Optional thin uppers (euro / orange) above non-steel cores — shrink into tip band
-      const layers = [{ img: core, w: coreW, h: coreH }];
-
-      // Gridfin side boosters
+      // Gridfin sides around current s1 (or gridfin body if no s1 / core is gridfin)
       if (boost?.id === "gridfin-booster") {
-        let side;
-        try { side = await getPart("side-boost"); }
-        catch { side = null; }
+        let side = null;
+        try { side = await getPart("side-boost"); } catch (_) { side = null; }
+        if (token !== composeToken) return null;
 
-        if (side) {
+        if (side && sel.s1) {
+          const cbb = contentBBox(core);
+          const sbb = contentBBox(side);
+          const coreScale = targetH / cbb.ch;
+          const coreW = Math.round(cbb.cw * coreScale);
+          const coreH = targetH;
           const sh = Math.round(targetH * 0.92);
-          const sw = Math.round(side.naturalWidth * (sh / side.naturalHeight));
+          const sw = Math.round(sbb.cw * (sh / sbb.ch));
           const gap = Math.max(2, Math.round(sw / 8));
           const canvasW = coreW + 2 * (sw + gap);
           const g = document.createElement("canvas");
           g.width = canvasW;
           g.height = targetH;
           const gctx = g.getContext("2d");
-          // left
-          gctx.drawImage(side, 0, targetH - sh, sw, sh);
-          // core center
-          gctx.drawImage(core, (canvasW - coreW) / 2, 0, coreW, coreH);
-          // right (mirror)
+          gctx.globalAlpha = 1;
+          gctx.drawImage(side, sbb.x0, sbb.y0, sbb.cw, sbb.ch, 0, targetH - sh, sw, sh);
+          gctx.drawImage(core, cbb.x0, cbb.y0, cbb.cw, cbb.ch, (canvasW - coreW) / 2, 0, coreW, coreH);
           gctx.save();
           gctx.translate(canvasW, 0);
           gctx.scale(-1, 1);
-          gctx.drawImage(side, 0, targetH - sh, sw, sh);
+          gctx.drawImage(side, sbb.x0, sbb.y0, sbb.cw, sbb.ch, 0, targetH - sh, sw, sh);
           gctx.restore();
-
-          const x = Math.round(cx - canvasW / 2);
-          const y = Math.round(sitY - targetH);
-          ctx.drawImage(g, x, y);
+          drawSeated(ctx, g, cx, sitY, targetH);
           return off;
         }
 
-        // No side sprite: composite two gridfin boosters flanking a thinner core look
-        // by drawing gridfin as the visible stack (wider than pencil)
+        // No side sprite or no s1: draw gridfin / core seated
         const gf = coreId === "gridfin-booster" ? core : await getPart("gridfin-booster");
-        const gfW = Math.round(gf.naturalWidth * (targetH / gf.naturalHeight));
-        const x = Math.round(cx - gfW / 2);
-        const y = Math.round(sitY - targetH);
-        ctx.drawImage(gf, x, y, gfW, targetH);
+        if (token !== composeToken) return null;
+        drawSeated(ctx, gf, cx, sitY, targetH);
         return off;
       }
 
       // Plain core (Moon Giant / Pencil Core / etc.)
-      {
-        const x = Math.round(cx - coreW / 2);
-        const y = Math.round(sitY - targetH);
-        ctx.drawImage(core, x, y, coreW, coreH);
-      }
+      drawSeated(ctx, core, cx, sitY, targetH);
       return off;
     }
 
-    let composeToken = 0;
     async function paintStack() {
       const token = ++composeToken;
-      const show = usesEmptyPad() && (
-        state.selected.s1 || state.selected.s2 ||
-        state.selected.payload || state.selected.boosters
-      );
+      const show = usesEmptyPad() && hasAnyParts();
+
       if (!show) {
-        stackEl.classList.remove("on", "liftoff");
-        stackEl.style.display = "none";
+        clearStackOverlay();
+        // clearStackOverlay bumps token again — that's fine
         return;
       }
 
+      // Clear previous frame immediately to avoid ghost while loading
+      try {
+        const ctx0 = stackEl.getContext("2d");
+        if (ctx0) ctx0.clearRect(0, 0, stackEl.width, stackEl.height);
+      } catch (_) {}
+
       const lb = letterboxRect();
       if (!lb || !plate.naturalWidth) {
-        stackEl.classList.add("on");
         return;
       }
 
       try {
-        const composed = await buildStackCanvas(lb.nw, lb.nh);
-        if (token !== composeToken) return;
+        const composed = await buildStackCanvas(lb.nw, lb.nh, token);
+        if (token !== composeToken) return; // stale
+        if (!composed) return;
 
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         stackEl.width = Math.round(lb.width * dpr);
@@ -491,16 +557,18 @@
         stackEl.style.top = lb.top + "px";
         stackEl.style.width = lb.width + "px";
         stackEl.style.height = lb.height + "px";
+        stackEl.style.transform = "";
+        stackEl.style.opacity = "1";
         stackEl.style.display = "block";
         stackEl.classList.add("on");
         if (state.phase !== "liftoff") stackEl.classList.remove("liftoff");
 
         const ctx = stackEl.getContext("2d");
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.globalAlpha = 1;
         ctx.clearRect(0, 0, lb.width, lb.height);
         ctx.drawImage(composed, 0, 0, lb.width, lb.height);
 
-        // Position flames near stack base during liftoff
         if (state.phase === "liftoff") {
           const tod = TODS[state.todIndex].id;
           const cx = CX[tod];
@@ -523,6 +591,25 @@
       [...tabs.children].forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
     }
 
+    function selectPart(p) {
+      if (state.phase !== "assemble") return;
+      // toggle off
+      if (state.selected[p.role]?.id === p.id) {
+        state.selected[p.role] = null;
+        return;
+      }
+      state.selected[p.role] = p;
+      // Mutual exclusion: Steel Booster ↔ s1 (Moon Giant / Pencil Core)
+      if (p.role === "boosters" && p.id === "steel-booster") {
+        state.selected.s1 = null;
+      }
+      if (p.role === "s1") {
+        if (state.selected.boosters?.id === "steel-booster") {
+          state.selected.boosters = null;
+        }
+      }
+    }
+
     function renderCards() {
       cards.innerHTML = "";
       PARTS[state.tab].forEach((p) => {
@@ -531,10 +618,7 @@
         el.className = "card" + (state.selected[p.role]?.id === p.id ? " selected" : "");
         el.innerHTML = `<img alt="" src="${kitSrc(p.id)}" /><div class="name">${p.name}</div>`;
         el.addEventListener("click", () => {
-          if (state.phase !== "assemble") return;
-          // toggle same card off, else select
-          if (state.selected[p.role]?.id === p.id) state.selected[p.role] = null;
-          else state.selected[p.role] = p;
+          selectPart(p);
           render();
         });
         cards.appendChild(el);
@@ -585,6 +669,8 @@
 
     document.getElementById("clearBtn").onclick = () => {
       state.selected = { s1: null, s2: null, payload: null, boosters: null };
+      clearStackOverlay();
+      setChrome();
       render();
     };
 
@@ -603,13 +689,13 @@
       await sleep(350);
       state.phase = "liftoff";
       render();
-      // kick CSS liftoff after paint
       requestAnimationFrame(() => {
         stackEl.classList.add("liftoff");
       });
       await sleep(2200);
       state.phase = "mission";
       stackEl.classList.remove("liftoff");
+      clearStackOverlay();
       render();
     };
 
@@ -622,8 +708,8 @@
       document.getElementById("outcomeScore").textContent = `ROCKET SCORE ${score}`;
       document.getElementById("outcomeText").textContent =
         choice === "deploy"
-          ? `${state.selected.payload.name} deployed from ${state.selected.s1.name} stack. Clean separation.`
-          : `${state.selected.s1.name} / ${state.selected.s2.name} coasting — explore path locked in.`;
+          ? `${state.selected.payload?.name || "Payload"} deployed from ${state.selected.s1?.name || "stack"}. Clean separation.`
+          : `${state.selected.s1?.name || "Stack"} / ${state.selected.s2?.name || ""} coasting — explore path locked in.`;
       render();
     }
 
@@ -636,9 +722,10 @@
         s1: PARTS.s1[0],
         s2: PARTS.s2[0],
         payload: PARTS.payload[0],
-        boosters: PARTS.boosters[1],
+        boosters: null,
       };
       state.todIndex = todFromHour(new Date().getHours());
+      clearStackOverlay();
       render();
     };
 
