@@ -20,23 +20,35 @@
       background: #000;
     }
     #plate {
+      position: absolute; left: 0; top: 0;
       width: 100%; height: 100%;
-      object-fit: contain; object-position: center;
+      object-fit: fill; /* size box set by JS plateMap (cover) */
       background: transparent; display: block;
+      image-rendering: auto;
     }
     #skyExt {
-      position: absolute; left: 0; right: 0; top: -120%; bottom: -30%;
+      position: absolute; left: 0; right: 0; top: -200%; bottom: -50%;
       pointer-events: none; z-index: 0;
       opacity: 0; transition: none;
+      image-rendering: pixelated;
+    }
+    #skyExt canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+    #parallax {
+      position: absolute; inset: 0; z-index: 2; pointer-events: none;
+      image-rendering: pixelated;
     }
     #world {
       position: absolute; inset: 0; z-index: 1;
       will-change: transform;
       transform: translate3d(0,0,0);
+      overflow: visible;
     }
     #plateWrap {
-      position: relative; width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center;
+      position: absolute; inset: 0;
+      overflow: hidden; /* cover crop */
+    }
+    #plateWrap.liftoffClimb {
+      overflow: visible;
     }
     #stack {
       position: absolute; pointer-events: none;
@@ -140,6 +152,7 @@
 <body>
   <div id="stage">
     <div id="skyExt" aria-hidden="true"></div>
+    <canvas id="parallax" aria-hidden="true"></canvas>
     <div id="countdownHud" aria-live="polite"></div>
     <div id="world">
       <div id="plateWrap">
@@ -184,14 +197,14 @@
     </div>
   </div>
 
-  <script src="pad-config.js?v=pad1"></script>
-  <script src="liftoff.js?v=liftoff20"></script>
+  <script src="pad-config.js?v=pad2"></script>
+  <script src="liftoff.js?v=liftoff27"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "compose4";
     const PAD_VER = "pad1";
-    const APP_VER = "liftoff20";
+    const APP_VER = "liftoff27";
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
@@ -290,6 +303,7 @@
       return 3;
     }
     state.todIndex = todFromHour(new Date().getHours());
+    plate.addEventListener("load", () => { applyPlateMap(); });
 
     TODS.forEach((t, i) => {
       const b = document.createElement("button");
@@ -353,21 +367,51 @@
       return line;
     }
 
-    function letterboxRect() {
+    /**
+     * Cover-style plate mapping (shared by plate, stack, FX, config coords).
+     * Landscape: cover, crop top/bottom as needed, centered.
+     * Portrait: cover, horizontal crop centered on TOD CX (clamped).
+     */
+    function plateMap() {
       const nw = plate.naturalWidth || NATIVE_W;
       const nh = plate.naturalHeight || NATIVE_H;
-      const cw = plate.clientWidth;
-      const ch = plate.clientHeight;
+      const wrap = plateWrap;
+      const cw = wrap.clientWidth || window.innerWidth;
+      const ch = wrap.clientHeight || window.innerHeight;
       if (!cw || !ch) return null;
-      const scale = Math.min(cw / nw, ch / nh);
+      const scale = Math.max(cw / nw, ch / nh); // cover
       const dw = nw * scale;
       const dh = nh * scale;
-      const plateOffX = plate.offsetLeft;
-      const plateOffY = plate.offsetTop;
-      const left = plateOffX + (cw - dw) / 2;
-      const top = plateOffY + (ch - dh) / 2;
-      return { left, top, width: dw, height: dh, scale, nw, nh };
+      let left, top;
+      if (cw >= ch) {
+        // landscape: center both axes (usually crop top/bottom)
+        left = (cw - dw) / 2;
+        top = (ch - dh) / 2;
+      } else {
+        // portrait: center horizontally on pad CX
+        const tod = TODS[state.todIndex].id;
+        const cfg = padCfg(tod);
+        const cxCss = (cfg.cx / nw) * dw;
+        left = cw / 2 - cxCss;
+        left = Math.min(0, Math.max(cw - dw, left));
+        top = (ch - dh) / 2;
+      }
+      return { left, top, width: dw, height: dh, scale, nw, nh, cw, ch, cover: true };
     }
+    // Back-compat alias
+    function letterboxRect() { return plateMap(); }
+    window.plateMap = plateMap;
+
+    function applyPlateMap() {
+      const lb = plateMap();
+      if (!lb) return null;
+      plate.style.left = lb.left + "px";
+      plate.style.top = lb.top + "px";
+      plate.style.width = lb.width + "px";
+      plate.style.height = lb.height + "px";
+      return lb;
+    }
+    window.applyPlateMap = applyPlateMap;
 
     /** Opaque-alpha content bbox; feet = densest bottom row (ignore sparse fringe). */
     function contentBBox(img) {
@@ -614,7 +658,7 @@
         if (ctx0) ctx0.clearRect(0, 0, stackEl.width, stackEl.height);
       } catch (_) {}
 
-      const lb = letterboxRect();
+      const lb = applyPlateMap();
       if (!lb || !plate.naturalWidth) {
         return;
       }
@@ -625,13 +669,15 @@
         if (!composed) return;
 
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        // Extra headroom above plate so climb translate doesn't clip the tip
+        const head = Math.ceil(window.innerHeight || 390);
+        const totalH = lb.height + head;
         stackEl.width = Math.round(lb.width * dpr);
-        stackEl.height = Math.round(lb.height * dpr);
+        stackEl.height = Math.round(totalH * dpr);
         stackEl.style.left = lb.left + "px";
-        stackEl.style.top = lb.top + "px";
+        stackEl.style.top = (lb.top - head) + "px";
         stackEl.style.width = lb.width + "px";
-        stackEl.style.height = lb.height + "px";
-        // Don't clobber rAF-driven liftoff translate
+        stackEl.style.height = totalH + "px";
         if (state.phase !== "liftoff") {
           stackEl.style.transform = "";
           stackEl.style.opacity = "1";
@@ -642,8 +688,8 @@
         const ctx = stackEl.getContext("2d");
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.globalAlpha = 1;
-        ctx.clearRect(0, 0, lb.width, lb.height);
-        ctx.drawImage(composed, 0, 0, lb.width, lb.height);
+        ctx.clearRect(0, 0, lb.width, totalH);
+        ctx.drawImage(composed, 0, head, lb.width, lb.height);
       } catch (e) {
         console.warn("compose failed", e);
       }
@@ -749,8 +795,11 @@
       if (liftoffEngine) return liftoffEngine;
       const API = window.RocketBayLiftoff;
       if (!API) { console.warn("liftoff.js missing"); return null; }
+      const captureMode = new URLSearchParams(location.search).has("capture");
       liftoffEngine = new API.LiftoffEngine({
-        getLetterbox: () => letterboxRect(),
+        captureMode: captureMode,
+        getLetterbox: () => plateMap(),
+        getParallaxEl: () => document.getElementById("parallax"),
         getSeat: () => {
           const tod = TODS[state.todIndex].id;
           const cfg = padCfg(tod);
@@ -781,6 +830,12 @@
         },
         onPerfSample: (samples) => { lastPerf = samples; window.__liftoffPerf = samples; },
       });
+      window.__liftoffCapture = {
+        start: () => { const e = getLiftoff(); if (e) e.startCapture(); },
+        step: (dt) => { const e = getLiftoff(); if (e) e.captureStep(dt || 1/60); },
+        running: () => !!(liftoffEngine && liftoffEngine.running),
+        state: () => window.__liftoffState,
+      };
       return liftoffEngine;
     }
 
@@ -855,6 +910,7 @@
         boosters: null,
       };
       state.todIndex = todFromHour(new Date().getHours());
+    plate.addEventListener("load", () => { applyPlateMap(); });
       clearStackOverlay();
       worldEl.style.transform = "";
       skyExt.style.opacity = "0";
@@ -863,7 +919,7 @@
       render();
     };
 
-    window.addEventListener("resize", () => paintStack());
+    window.addEventListener("resize", () => { applyPlateMap(); if (state.phase !== "liftoff") paintStack(); });
     render();
   </script>
 </body>

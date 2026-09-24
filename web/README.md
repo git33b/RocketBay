@@ -35,15 +35,20 @@ API: `window.RocketBayPadConfig.padFor(todId)` → config object; `PAD_CONFIG` m
 
 Compose (`index.html`) seating, plate path, and liftoff nozzle/glow/smoke all call `padFor` — **no leftover hardcoded SIT_Y=548 constants**.
 
-## Liftoff feel (`liftoff.js`)
+## Liftoff feel (`liftoff.js` v2 / liftoff24)
 
 1. Light pad-ops then **T-5…T-0** countdown (GO FOR LAUNCH)
-2. **T-2** ignition: pixel-crisp flame/plume at nozzle (stack content-bbox bottom @ SIT_Y), TOD-tinted pad glow, sideways smoke
-3. **T-0** clamp release → ~0.5s hold → ease-in climb `y = a·t²` via rAF (no CSS slide)
+2. **T-2** ignition: layered white→yellow→orange→red tapered flame (2px display grid, additive), pad glow, ground smoke at `deckY`
+3. **T-0** release flash (~150ms) → ~0.5s hold → ease-in climb `y = a·t²`
 4. Screen shake + `navigator.vibrate` (feature-detected)
-5. Camera pans up (world `translate3d`); `#skyExt` fills above plate so no black gap
-6. PSP-sharp particles: integer grid, posterized palette, `imageSmoothingEnabled=false`, no blur / no radial-gradient flames
-7. Optional WebAudio rumble (muted by default; SOUND toggle; AudioContext after gesture)
-8. Perf: FX canvas letterboxed, DPR≤2, ~520 particle pool, composited CSS transforms only
+5. Camera follow; cover-style `plateMap()` (landscape crop / portrait CX-centered); `#skyExt` tiles sampled plate top band with soft blend
+6. Split smoke: ground (world/deck anchored) + nozzle trail; round pixel puffs; low-res buffer upscale
+7. Parallax stars/clouds with velocity streaks; altitude grade toward deep sky
+8. Optional WebAudio rumble (muted by default); DPR≤2
+9. Deterministic capture: `?capture=1` + `window.__liftoffCapture.step(1/60)`
 
 FLY AGAIN resets camera, shake, particles, and audio.
+
+### Plate mapping
+
+`plateMap()` / `applyPlateMap()` — **cover** (not contain). Landscape centers; portrait centers on TOD `cx`. Stack, FX, and config coords share this transform.
