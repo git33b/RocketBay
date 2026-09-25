@@ -1,7 +1,7 @@
 {
-  "name": "RocketBay",
-  "short_name": "RocketBay",
-  "description": "Build a rocket from modular parts and launch it.",
+  "name": "Launch Pad",
+  "short_name": "Launch Pad",
+  "description": "Launch Pad — build a rocket from modular parts and launch it.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
