@@ -439,35 +439,51 @@
     while (this.nextDecorX < this.cam * PAR.mid + this.viewW + 200) this._decor();
     if (!this.hazardsOn || this.phase !== "flight") return;
     const ahead = this.cam + Math.max(this.viewW, 1600) + 260;
-    while (this.nextGateX < ahead) this._gate(this.nextGateX);
-    this._spawnMeteors();
+    let guard = 0;
+    while (this.nextGateX < ahead && guard++ < 12) {
+      const at = this.nextGateX;
+      try { this._gate(this.nextGateX); }
+      catch (err) {
+        // never stall the spawn cursor — advance and keep going
+        if (this.nextGateX <= at) this.nextGateX = at + 560;
+        if (typeof console !== "undefined") console.warn("[flight2b] gate spawn", err);
+      }
+      if (this.nextGateX <= at) this.nextGateX = at + 560;
+    }
+    try { this._spawnMeteors(); }
+    catch (err) { if (typeof console !== "undefined") console.warn("[flight2b] meteor spawn", err); }
   };
-  // v1.3.2 meteors: enter from RIGHT, move left (+ slight vy); rate rises with depth
+  // v1.3.2 meteors: spawn OFF the right edge, cross LEFT at 540–760 px/s screen-relative
+  // (faster than scroll). Body hitbox only; fiery tail is non-colliding art.
   P._spawnMeteors = function () {
     if (this.t < this.nextMeteorAt) return;
     const R = () => this._rand();
     const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
-    // L1 sparse (~every 5-7s); later denser (~every 1.4-2.5s), bursts of 1-3
-    const gap = (5.5 - 3.6 * u) * (0.75 + R() * 0.5);
-    this.nextMeteorAt = this.t + Math.max(1.1, gap);
-    const burst = 1 + (R() < 0.25 + 0.35 * u ? 1 : 0) + (R() < 0.12 * u ? 1 : 0);
+    // rate rises with depth: ~5.5s → ~1.4s between waves
+    const gap = (5.5 - 3.8 * u) * (0.75 + R() * 0.5);
+    this.nextMeteorAt = this.t + Math.max(1.0, gap);
+    const burst = 1 + (R() < 0.28 + 0.35 * u ? 1 : 0) + (R() < 0.15 * u ? 1 : 0);
     for (let i = 0; i < burst; i++) {
-      const drawW = 48 + R() * 32;
-      const y = 84 + R() * (WORLD_H - 168); // anywhere excl. HUD/chrome bands
-      const x = this.cam + this.viewW + 60 + i * (70 + R() * 90);
-      const vx = -(140 + 120 * u + R() * 90); // cross left against/with scroll
-      const vy = (R() * 2 - 1) * (30 + 50 * u);
+      const drawW = 52 + R() * 28; // ~48–80 pack range
+      const y = 84 + R() * (WORLD_H - 168);
+      // just past the right edge of the current view
+      const x = this.cam + this.viewW + 80 + i * (90 + R() * 110);
+      // screen-relative leftward speed 540–760 px/s (faster than scroll)
+      const cross = 540 + R() * 220;
+      const vx = this.speed - cross; // d(sx)/dt = vx - speed = -cross
+      const vy = (R() * 2 - 1) * (40 + 60 * u);
       const h = this._hazard("hazard-meteor", x, y, drawW, 1, vx, vy, this._zoneAtX(x));
-      if (h) { h.rot = -0.4 - R() * 0.5; this.meteorN++; }
+      if (h) { h.rot = -0.35 - R() * 0.55; h.kind = 2; /* meteor mover */ this.meteorN++; }
     }
   };
-  P._hazard = function (name, x, y, drawW, par, vx, vy, zone) {
+    P._hazard = function (name, x, y, drawW, par, vx, vy, zone) {
     let h = null; for (let i = 0; i < this.haz.length; i++) if (!this.haz[i].on) { h = this.haz[i]; break; }
     if (!h) return null;
-    const m = SPR[name], sc = drawW / m[0];
+    const m = SPR[name]; if (!m) return null;
+    const sc = drawW / m[0];
     const rel = (zone === 4 && name.indexOf("asteroid") === 0) ? "zones/ice-hazard-variants/" + name + ".png" : name + ".png";
     h.on = true; h.im = rel; h.x = x; h.y = y; h.vx = vx || 0; h.vy = vy || 0; h.par = par || 1;
-    h.r = m[4] * sc; h.dw = m[0] * sc; h.dh = m[1] * sc; h.ox = m[2] * sc; h.oy = m[3] * sc; h.rot = 0;
+    h.r = m[4] * sc; h.dw = m[0] * sc; h.dh = m[1] * sc; h.ox = m[2] * sc; h.oy = m[3] * sc; h.rot = 0; h.kind = 0;
     return h;
   };
   P._pickup = function (kind, x, y) { // kind: 0 coin, 1 fuel, 2 shield, 3 magnet, 4 gem
@@ -479,64 +495,59 @@
     p.im = name + ".png"; p.dw = m[0] * sc; p.dh = m[1] * sc; p.ox = m[2] * sc; p.oy = m[3] * sc; p.sc = sc;
   };
   P._gate = function (gx) {
-    // v1.3.2-anywhere-density + unpredictability_lock + escape-gap + spread/cluster
+    // v1.3.2-anywhere-density: continuous Y, rate+density progression, escape gap,
+    // spread default / occasional cluster, unpredictability (no mirrored walls).
     const T = this._tier(), R = () => this._rand();
     const zone = this._zoneAtX(gx), Z = ZONES[zone];
     this.gateN++;
     const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
-    // Progression = rate + density (not fixed patterns): tighter spacing + more pieces later
-    const spacingJitter = (R() * 2 - 1) * (40 + 30 * u);
-    const spacing = Math.max(420, T.spacing + spacingJitter - Math.floor(40 * u));
-    // Gap: tier floor, varies each wall (unpredictable), never vanishes
+
+    // Progression = rate + density (not fixed patterns)
+    const spacing = Math.max(420, T.spacing + (R() * 2 - 1) * (40 + 30 * u) - Math.floor(40 * u));
     const gapFloor = T.gap;
-    const gapVar = Math.floor(R() * (55 + 40 * (1 - u))); // more variance early
-    const gapH = Math.max(gapFloor, Math.round(GAP_START + (gapFloor - GAP_START) * u) + gapVar - Math.floor(20 * u));
-    // Continuous Y anywhere on playable screen (exclude HUD ~y<84 / bottom chrome ~y>WORLD_H-40)
+    const gapH = Math.max(gapFloor, Math.round(GAP_START + (gapFloor - GAP_START) * u) + Math.floor(R() * (55 + 40 * (1 - u))) - Math.floor(20 * u));
+
+    // Continuous Y anywhere on playable screen (exclude HUD / bottom chrome only)
     const yMin = 84, yMax = WORLD_H - 40;
     let lo = gapH / 2 + yMin, hi = yMax - gapH / 2;
     const pb = this.planetBlock;
     if (gx >= pb.top0 && gx <= pb.top1) lo = Math.max(lo, pb.topY + gapH / 2 + 30);
     if (gx >= pb.bot0 && gx <= pb.bot1) hi = Math.min(hi, pb.botY - gapH / 2 - 30);
     if (lo > hi) { const mid = (lo + hi) / 2; lo = hi = mid; }
-    // Unpredictable gap centre: large jump, avoid last signature (no copy-paste walls)
+
     let c = yMin + gapH / 2 + R() * Math.max(1, (yMax - yMin - gapH));
     c = clamp(c, lo, hi);
-    // Soft anti-repeat: if too close to last centre with similar gap, shove
     if (Math.abs(c - this.lastGapC) < 35 && Math.abs(gapH - this.gapJitter) < 25) {
       c = clamp(c + (R() < 0.5 ? -1 : 1) * (80 + R() * 120), lo, hi);
     }
     this.gapJitter = gapH;
     const g0 = c - gapH / 2, g1 = c + gapH / 2;
-    // Density: L1 prefer 1; later more 2 and occasional 3-cluster
-    const clusterP = CLUSTER_P * (0.55 + 0.9 * u);
-    const cluster = R() < clusterP;
+
+    // Density: L1 prefer 1; later denser; cluster ~15–25% scaled by depth
+    const cluster = R() < (CLUSTER_P * (0.55 + 0.9 * u));
     let n;
     if (cluster) n = 2 + (R() < (0.35 + 0.4 * u) ? 1 : 0);
-    else n = (R() < (0.62 - 0.25 * u)) ? 1 : 2; // L1 mostly 1; later more 2
+    else n = (R() < (0.55 - 0.25 * u)) ? 1 : 2;
+
     const pool = DEBRIS_MIX[zone];
+    const used = [];
     const pickName = () => {
-      // Prefer mixed silhouettes; avoid same name twice in a wall when possible
       let name = pool[Math.floor(R() * pool.length)], tries = 0;
-      while (tries++ < 4 && this._gateNames && this._gateNames.indexOf(name) >= 0)
-        name = pool[Math.floor(R() * pool.length)];
+      while (tries++ < 5 && used.indexOf(name) >= 0) name = pool[Math.floor(R() * pool.length)];
       return name;
     };
-    this._gateNames = [];
     const drawWFor = (name) => {
-      if (DEBRIS_DRAW[name] != null) {
-        const base = DEBRIS_DRAW[name];
-        return base * (0.85 + R() * 0.35); // size mix = silhouette hierarchy
-      }
+      if (DEBRIS_DRAW[name] != null) return DEBRIS_DRAW[name] * (0.85 + R() * 0.35);
       return (Z.small ? 44 + R() * 26 : 50 + R() * 70);
     };
-    // Place OUTSIDE escape lane; Y continuous anywhere (soft mid bias only)
+
+    // Place fully OUTSIDE the escape gap; Y continuous (soft mid bias only)
     const place = (name, x, preferSide) => {
       const w = drawWFor(name), m = SPR[name]; if (!m) return false;
       const sc = w / m[0], rr = m[4] * sc, visR = rr / 0.8;
       let side = preferSide;
       if (side == null) {
         const b = R();
-        // soft mid bias for blocking mass, NOT a hard lane lock
         side = b < 0.18 ? -1 : b < 0.82 ? (c < WORLD_H / 2 ? 1 : -1) : (R() < 0.5 ? -1 : 1);
       }
       const edgePad = Math.max(yMin + visR, visR + 4);
@@ -545,14 +556,12 @@
       if (side < 0) {
         const maxY = g0 - visR - 4;
         if (maxY < edgePad) return false;
-        // continuous anywhere above gap (not discrete rows)
         cy = edgePad + R() * Math.max(1, maxY - edgePad);
       } else {
         const minY = g1 + visR + 4;
         if (minY > edgePadBot) return false;
         cy = minY + R() * Math.max(1, edgePadBot - minY);
       }
-      // soft nudge off decor planet centres
       for (let i = 0; i < this.decor.length; i++) {
         const d = this.decor[i]; if (!d.on) continue;
         const dx = (d.x - this.cam * d.par) - (x - this.cam);
@@ -562,55 +571,65 @@
       cy = clamp(cy, edgePad, edgePadBot);
       if (cy + visR > g0 && cy - visR < g1) return false;
       this._hazard(name, x, cy, w, 1, 0, 0, zone);
-      this._gateNames.push(name);
+      used.push(name);
       return true;
     };
-    // Asymmetric layouts — never mirrored twins / even grids
+
+    let placed = 0;
     if (cluster) {
       const side = R() < 0.5 ? -1 : 1;
       let x0 = gx - (n - 1) * (25 + R() * 20);
       for (let i = 0; i < n; i++) {
-        // uneven hx + occasional side flip on last piece for asymmetry
         const s = (i === n - 1 && R() < 0.35) ? -side : side;
-        place(pickName(), x0 + i * (36 + R() * 40), s);
+        if (place(pickName(), x0 + i * (36 + R() * 40), s)) placed++;
       }
     } else if (n === 1) {
-      place(pickName(), gx + (R() * 2 - 1) * (15 + R() * 40), null);
+      if (place(pickName(), gx + (R() * 2 - 1) * (15 + R() * 40), null)) placed++;
     } else {
       const hx = SPREAD_HX[0] + R() * (SPREAD_HX[1] - SPREAD_HX[0]);
       const side0 = R() < 0.5 ? -1 : 1;
-      // unequal offsets (not left/right twins)
-      place(pickName(), gx - hx * (0.25 + R() * 0.25), side0);
-      place(pickName(), gx + hx * (0.3 + R() * 0.35), R() < 0.78 ? -side0 : side0);
+      if (place(pickName(), gx - hx * (0.25 + R() * 0.25), side0)) placed++;
+      if (place(pickName(), gx + hx * (0.3 + R() * 0.35), R() < 0.78 ? -side0 : side0)) placed++;
     }
-    const sig = [Math.round(c / 40), Math.round(gapH / 20), n, cluster ? 1 : 0].join(":");
-    this.lastGateSig = sig;
+    // Guarantee at least one hazard on this gate (retry opposite side if empty)
+    if (placed === 0) {
+      place(pickName(), gx, c < WORLD_H / 2 ? 1 : -1) || place(pickName(), gx, c < WORLD_H / 2 ? -1 : 1);
+    }
+
     if (!this.gates) this.gates = [];
     if (this.gates.length > 24) this.gates.shift();
-    this.gates.push({ x: gx, c: c, gapH: gapH, n: n, cluster: cluster, g0: g0, g1: g1 });
+    this.gates.push({ x: gx, c: c, gapH: gapH, n: n, cluster: cluster, g0: g0, g1: g1, placed: placed });
 
-    // planet (big slow 0.7x)
+    // big parallax planets (non denser-than-gate; stay out of escape bookkeeping)
     const mix = Z.mix;
     if (mix.planet > 0 && R() < 0.22 * mix.planet && this.gateN > 2) {
-      const pk = R(), name = zone === 3 ? (pk < 0.5 ? "planet_ringed" : "planet_moon") : (pk < 0.6 ? "planet_gas" : "planet_moon");
+      const pk = R();
+      const name = zone === 3 ? (pk < 0.5 ? "planet_ringed" : "planet_moon") : (pk < 0.6 ? "planet_gas" : "planet_moon");
       const drawW = name === "planet_ringed" ? 420 + R() * 100 : name === "planet_gas" ? 220 + R() * 100 : 140 + R() * 80;
-      const m = SPR[name], r = m[4] * (drawW / m[0]);
-      const top = R() < 0.5, cy = top ? -r * 0.35 : WORLD_H + r * 0.35;
-      const lead = gx + spacing * 1.5;
-      const camAt = lead - PLAYER_X;
-      const xp = PAR.planets * camAt + PLAYER_X;
-      const gA = (xp - PLAYER_X - r - 60) / PAR.planets + PLAYER_X, gB = (xp - PLAYER_X + r + 60) / PAR.planets + PLAYER_X;
-      if (!(top ? (pb.top1 > gx) : (pb.bot1 > gx))) {
-        this._hazard(name, xp, cy, drawW, PAR.planets, 0, 0, zone);
-        if (top) { pb.top0 = gA; pb.top1 = gB; pb.topY = cy + r; } else { pb.bot0 = gA; pb.bot1 = gB; pb.botY = cy - r; }
+      const m = SPR[name];
+      if (m) {
+        const r = m[4] * (drawW / m[0]);
+        const top = R() < 0.5, cy = top ? -r * 0.35 : WORLD_H + r * 0.35;
+        const lead = gx + spacing * 1.5;
+        const camAt = lead - PLAYER_X;
+        const xp = PAR.planets * camAt + PLAYER_X;
+        const gA = (xp - PLAYER_X - r - 60) / PAR.planets + PLAYER_X;
+        const gB = (xp - PLAYER_X + r + 60) / PAR.planets + PLAYER_X;
+        if (!(top ? (pb.top1 > gx) : (pb.bot1 > gx))) {
+          this._hazard(name, xp, cy, drawW, PAR.planets, 0, 0, zone);
+          if (top) { pb.top0 = gA; pb.top1 = gB; pb.topY = cy + r; }
+          else { pb.bot0 = gA; pb.bot1 = gB; pb.botY = cy - r; }
+        }
       }
     }
+
     // pickups along escape lane
     const prevX = gx - spacing, pc = this.lastGapC;
     if (R() < Math.min(1, T.arcs * spacing / 1000)) {
       const nn = 6 + Math.floor(R() * 5), x0 = prevX + spacing * 0.3, step = 36, amp = 30 + R() * 40;
       for (let i = 0; i < nn; i++) {
-        const uu = i / (nn - 1), x = x0 + i * step, base = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1);
+        const uu = i / Math.max(1, nn - 1), x = x0 + i * step;
+        const base = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1);
         this._pickup(0, x, base - Math.sin(uu * Math.PI) * amp);
       }
     }
@@ -621,28 +640,29 @@
       else if (q < T.shield + T.magnet) this._pickup(3, gx, c);
       else if (q < T.shield + T.magnet + T.gem) this._pickup(4, gx, c);
     }
-    // extras between gates (stray rocks / ember / comet) — leave lane clear; density rises with u
+
+    // extras between gates (stray rocks / ember / comet) — never invade escape gap
     const extraN = T.extra * spacing / 1000 * (0.22 + 0.2 * u) * (mix.asteroid + mix.comet + mix.ember);
-    let nE = Math.floor(extraN) + (R() < extraN % 1 ? 1 : 0);
+    let nE = Math.floor(extraN) + (R() < (extraN % 1) ? 1 : 0);
     for (let e = 0; e < nE; e++) {
       const x = prevX + spacing * (0.25 + R() * 0.5);
-      const path = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1);
       const typeR = R() * (mix.asteroid + mix.comet + mix.ember + 0.001);
       if (typeR < mix.asteroid) {
         const name = pickName();
-        const w = drawWFor(name), m = SPR[name], rr = m[4] * (w / m[0]);
-        // anywhere outside gap (continuous Y)
+        const w = drawWFor(name), m = SPR[name]; if (!m) continue;
+        const rr = m[4] * (w / m[0]);
         const above = R() < 0.5;
         const y = above
           ? (yMin + rr + R() * Math.max(1, g0 - rr - 8 - (yMin + rr)))
           : (g1 + rr + 8 + R() * Math.max(1, yMax - rr - (g1 + rr + 8)));
         if (y - rr > 0 && y + rr < WORLD_H) this._hazard(name, x, y, w, 1, 0, 0, zone);
       } else if (typeR < mix.asteroid + mix.comet) {
-        const w = 120 + R() * 50; this._hazard("comet", x + 420, -60 - R() * 120, w, 1, -170, 150, zone);
+        this._hazard("comet", x + 420, -60 - R() * 120, 120 + R() * 50, 1, -170, 150, zone);
       } else {
-        const w = 48 + R() * 24; this._hazard("ember", x + 160, -40 - R() * 160, w, 1, -20, 70 + R() * 40, zone);
+        this._hazard("ember", x + 160, -40 - R() * 160, 48 + R() * 24, 1, -20, 70 + R() * 40, zone);
       }
     }
+
     this.lastGapC = c;
     this.nextGateX = gx + spacing;
   };
@@ -670,7 +690,8 @@
       const h = this.haz[i]; if (!h.on) continue;
       h.x += h.vx * dt; h.y += h.vy * dt;
       const sx = h.x - cam * h.par;
-      if (sx < -h.dw - 300 || sx > this.viewW + 500 || h.y > WORLD_H + 400 || h.y < -400) h.on = false;
+      // keep right-entering movers alive until well past the left edge
+      if (sx < -h.dw - 300 || sx > this.viewW + 900 || h.y > WORLD_H + 400 || h.y < -400) h.on = false;
     }
     const mag = this.magnetT > 0 && !this.crashed;
     for (let i = 0; i < this.pick.length; i++) {
