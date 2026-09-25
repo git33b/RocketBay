@@ -1,4 +1,5 @@
-/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-c3 BH polish
+/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-d1 deadly rims
+ * GP1-BETA D1: danger rim + hot tick on deadly hazards; decor planets never inherit rim.
  * GP1-BETA C2: cruise longer dual-layer exhaust + ~10° nose-up while thrusting (flight gameplay).
  * GP1-BETA s6b5: plume hold/morph + scenery crossfade across reveal; keep scale/lb/no-second-climb, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
@@ -1437,14 +1438,11 @@
         const im = this._get(h.im); if (!im) continue;
         const sx = h.x - cam * h.par;
         if (sx + h.dw < -50 || sx - h.dw > VW + 50) continue;
-        const deadly = h.par === 1 && (h.kind === 3 || h.kind === 2 || (h.im && (h.im.indexOf("asteroid") === 0 || h.im.indexOf("hazard-") === 0)));
+        // gp1-d1: deadly = gameplay hazards (asteroid/hazard-*/meteor); never decor planets (par!==1) or BH (own C3 telegraph)
+        const deadly = h.par === 1 && h.kind !== 3 && (h.kind === 2 || (h.im && (h.im.indexOf("asteroid") === 0 || (h.im.indexOf("hazard-") === 0 && h.im.indexOf("hazard-blackhole") !== 0))));
         const decorPlanet = h.par !== 1;
         if (h.kind === 3 || h.rot) {
           x.save(); x.translate(sx, h.y); x.rotate(h.rot || 0);
-          if (deadly && h.kind !== 3) { // silhouette before sprite (BH has own core ring in pull VFX)
-            x.strokeStyle = "rgba(255, 210, 140, 0.55)"; x.lineWidth = 3;
-            x.beginPath(); x.arc(0, 0, Math.max(h.r * 1.15, h.dw * 0.28), 0, Math.PI * 2); x.stroke();
-          }
           x.drawImage(im, Math.round(-h.ox), Math.round(-h.oy), Math.round(h.dw), Math.round(h.dh));
           if (h.kind === 3) { // always-on core/ring telegraph at phone size
             x.strokeStyle = "rgba(200,160,255,0.75)"; x.lineWidth = 2.5;
@@ -1458,16 +1456,19 @@
             const reach = Math.max(h.dw * 0.95, h.r * 3.2);
             this._drawBhPullStreaks(x, sx, h.y, h.r, reach, this.px, this.py, 0.45);
           }
-        } else {
+          // gp1-d1: world-aligned danger rim after sprite (not rotated with meteor)
           if (deadly) {
-            x.save();
-            x.strokeStyle = "rgba(255, 200, 120, 0.5)"; x.lineWidth = 2.5;
-            x.beginPath(); x.arc(sx, h.y, Math.max(h.r * 1.1, Math.min(h.dw, h.dh) * 0.32), 0, Math.PI * 2); x.stroke();
-            x.restore();
+            const rr = Math.max(h.r * 1.18, Math.min(h.dw, h.dh) * 0.36);
+            this._drawDangerRim(x, sx, h.y, rr);
           }
+        } else {
           x.globalAlpha = decorPlanet ? 0.92 : 1;
           x.drawImage(im, Math.round(sx - h.ox), Math.round(h.y - h.oy), Math.round(h.dw), Math.round(h.dh));
           x.globalAlpha = 1;
+          if (deadly) {
+            const rr = Math.max(h.r * 1.18, Math.min(h.dw, h.dh) * 0.36);
+            this._drawDangerRim(x, sx, h.y, rr);
+          }
         }
         if (this.cfg && this.cfg.debugHitbox && h.kind === 3) {
           x.save();
@@ -1680,6 +1681,33 @@
         }
       }
     }
+  };
+  // gp1-d1: PSP-sharp red danger rim + cardinal hot ticks (architect _fx/danger-rim.png)
+  // Only called for deadly hazards — decor planets / parallax decor never reach here.
+  P._drawDangerRim = function (x, cx, cy, rad) {
+    const r = Math.max(10, rad);
+    x.save();
+    x.imageSmoothingEnabled = false;
+    // outer danger ring — 1–2px sharp red
+    x.strokeStyle = "rgba(255, 60, 40, 0.88)";
+    x.lineWidth = 2;
+    x.beginPath();
+    x.arc(Math.round(cx), Math.round(cy), Math.round(r), 0, Math.PI * 2);
+    x.stroke();
+    // hot ticks at N/E/S/W — warm orange tick crossing the rim (outward + slight inward)
+    x.strokeStyle = "rgba(255, 180, 80, 0.95)";
+    x.lineWidth = 2;
+    const tick = Math.max(3, Math.min(6, Math.round(r * 0.14)));
+    const cxi = Math.round(cx), cyi = Math.round(cy), ri = Math.round(r);
+    // N
+    x.beginPath(); x.moveTo(cxi, cyi - ri - tick); x.lineTo(cxi, cyi - ri + 2); x.stroke();
+    // E
+    x.beginPath(); x.moveTo(cxi + ri - 2, cyi); x.lineTo(cxi + ri + tick, cyi); x.stroke();
+    // S
+    x.beginPath(); x.moveTo(cxi, cyi + ri - 2); x.lineTo(cxi, cyi + ri + tick); x.stroke();
+    // W
+    x.beginPath(); x.moveTo(cxi - ri - tick, cyi); x.lineTo(cxi - ri + 2, cyi); x.stroke();
+    x.restore();
   };
   // gp1-c3: inbound purple pull-dust streaks (telegraph) — cosmetic; gravity stays bh1g
   P._drawBhPullStreaks = function (x, hx, hy, coreR, reach, aimX, aimY, strength) {
