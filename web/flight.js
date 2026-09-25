@@ -1,4 +1,6 @@
-/* RocketBay FLIGHT MODE v1 / flight2d live / bh1g-lab (blackhole-v1)
+/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
+ * GP1-BETA: pad→flight seam, tilt-on-thrust, climb plume, BH purple/blue pull VFX, bigger crash,
+ * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
  * swallow death (no crash boom on BH), L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5;
@@ -16,10 +18,13 @@
   const MIN_VIEW_W = 760;                    // narrower screens (portrait) letterbox the band to show >= 760 px ahead
   const PLAYER_X = 285;                      // rocket centre x after pitch-over
   const ROCKET_LEN = 208;                    // flight sprite length (pack)
-  const CLIMB_T = 2.4, PITCH_T = 1.0;        // climb + pitch-over (pack)
+  const CLIMB_T = 3.4, PITCH_T = 1.75;       // gp1-beta: longer climb hold + smoother pitch-over
+  const PITCH_XFADE = 0.42;                  // early pitch: crossfade climb column → starfield (no gantry pop)
   const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
-  const TILT_MAX = 15 * Math.PI / 180, TILT_RATE = 9;    // tilt follows vy (1/s response)
+  const TILT_MAX = 8 * Math.PI / 180, TILT_RATE = 7;     // gp1: ~0–8° nose-up while thrusting only
+  const CLIMB_PLUME = 2.35;                  // climb flame length vs flight (match pad power)
+  const CLIMB_SHAKE = 3.2;                   // climb cam shake amp (design px)
   const FUEL_DRAIN = 1 / 11;                 // tank fraction per second of thrust held (placeholder)
   const FUEL_REFILL = 0.5;                   // fuel pickup
   const KM_PER_PX = 1500 / 15360;            // 1 zone (1500 km) == one zone-art segment (3840 art px at 0.25x)
@@ -66,11 +71,11 @@
   }
   const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
   const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
-  const TIERS = [ // pack tiers (speed band -> density)
-    { max: 420, spacing: 640, gap: 300, extra: 1.6, shift: 160, arcs: 1.2, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02 },
-    { max: 490, spacing: 640, gap: 265, extra: 1.8, shift: 180, arcs: 1.1, fuelN: 5, shield: 0.07, magnet: 0.07, gem: 0.03 },
-    { max: 560, spacing: 590, gap: 235, extra: 2.2, shift: 190, arcs: 1.0, fuelN: 4, shield: 0.08, magnet: 0.07, gem: 0.04 },
-    { max: 1e9, spacing: 560, gap: 210, extra: 2.6, shift: 200, arcs: 0.9, fuelN: 4, shield: 0.10, magnet: 0.06, gem: 0.05 },
+  const TIERS = [ // pack tiers (speed band -> density) — gp1 light density bump
+    { max: 420, spacing: 600, gap: 290, extra: 1.85, shift: 160, arcs: 1.35, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02 },
+    { max: 490, spacing: 600, gap: 255, extra: 2.05, shift: 180, arcs: 1.2, fuelN: 5, shield: 0.07, magnet: 0.07, gem: 0.03 },
+    { max: 560, spacing: 560, gap: 225, extra: 2.4, shift: 190, arcs: 1.1, fuelN: 4, shield: 0.08, magnet: 0.07, gem: 0.04 },
+    { max: 1e9, spacing: 530, gap: 200, extra: 2.85, shift: 200, arcs: 1.0, fuelN: 4, shield: 0.10, magnet: 0.06, gem: 0.05 },
   ];
   // flight-pack-v1.3.1 spacing + escape-gap (Ateeb): spread default, cluster occasional, gap always
   const CLUSTER_P = 0.20;                 // ~15-25% of walls are dense packs
@@ -130,7 +135,7 @@
   };
   const RING_R = [0, 12, 20, 27, 33, 38, 42, 45];          // v1.1 deploy puff ring (screen px)
   const PAY_FWD = [0, 6, 14, 24, 35, 46, 57, 68], PAY_SIDE = [0, 6, 11, 15, 18, 20, 21, 22];
-  const BURST_R = [20, 42, 62, 74, 80, 80, 74, 64];         // crash burst radius per frame
+  const BURST_R = [32, 64, 96, 118, 136, 136, 122, 104];   // gp1: Moon Giant–class crash punch
   const BURST_COL = ["#FFFFEE", "#FFDE40", "#FF8C1C", "#D6301C", "#563A46"];
   const HUD = { navy: "rgba(10,28,58,0.8)", cyan: "#64D2FF", inner: "#3C6385", text: "#E1F2FF" };
 
@@ -277,7 +282,7 @@
     this.tutorialDone = !this.wantTutorial;
     this.practiceT = 0; this.hazardsOn = !this.wantTutorial;
     this.nextMeteorAt = 0; this.meteorN = 0;
-    this.nextBhAt = 1e9; this.bhN = 0; this._bhInPull = false;
+    this.nextBhAt = 1e9; this.bhN = 0; this._bhInPull = false; this._climbShake = 0; this._crashSparked = false;
     this.lastGateSig = ""; this.gapJitter = 0;
     this.nextDecorX = 0; this.popT = -10; this.gameOverFired = false; this.result = null; this.events.length = 0;
     this.bodyY = 720; this.accum = 0; this.lastTs = 0; this.fps = []; this._flash = 0;
@@ -403,18 +408,24 @@
     if (this.phase === "climb") {
       const u = this.phaseT / CLIMB_T;
       this.camY = 2160 * (1 - ease(u));
-      if (this.phaseT >= CLIMB_T) { this.phase = "pitch"; this.phaseT = 0; this.camY = 0; this.cam = -180; }
+      // light climb shake + motion blur cue (matches pad power)
+      this._climbShake = CLIMB_SHAKE * (0.55 + 0.45 * Math.sin(this.t * 38)) * (1 - ease(u));
+      if (this.phaseT >= CLIMB_T) { this.phase = "pitch"; this.phaseT = 0; this.camY = 0; this.cam = -180; this._climbShake = 0; }
       return;
     }
     if (this.phase === "pitch") {
       const u = clamp(this.phaseT / PITCH_T, 0, 1);
-      this.speed = SPEED0 * ease(u);
+      const eu = ease(u);
+      this.speed = SPEED0 * eu;
       this.cam += this.speed * dt;
-      this.px = 640 + (PLAYER_X - 640) * ease(u);
-      this.tilt = -Math.PI / 2 * (1 - ease(u));
+      this.px = 640 + (PLAYER_X - 640) * eu;
+      // smooth nose-up → flat; never snap
+      this.tilt = -Math.PI / 2 * (1 - eu);
       this.bodyY = 720 + (105 - 720) * easeOut(u);
+      this._climbShake = 0;
       if (this.phaseT >= PITCH_T) {
-        this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
+        // seed ~95 km so HUD matches leaving-atmosphere / Earth-limb look (gp1 P1#12)
+        this.cam = 0; this.dist = 95 / KM_PER_PX; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
         this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
         if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
         else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 5 + this._rand() * 8); // bh1e: L1 can see first hole ~5–13s
@@ -446,7 +457,7 @@
       this.vy = clamp(this.vy, -VY_MAX, VY_MAX);
       this.py += this.vy * dt;
       if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
-      const tt = (this.vy / VY_MAX) * TILT_MAX;
+      const tt = thrusting ? -TILT_MAX * (0.55 + 0.45 * clamp(-this.vy / VY_MAX, 0, 1)) : 0;
       this.tilt += (tt - this.tilt) * Math.min(1, TILT_RATE * dt);
       // keep in band
       if (this.py < 40) { this.py = 40; this.vy = Math.max(0, this.vy); }
@@ -501,7 +512,9 @@
     this.vy = clamp(this.vy, -VY_MAX * 1.15, VY_MAX * 1.15);
     this.py += this.vy * dt;
     if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * (light ? LIGHT_FUEL : 1) * dt);
-    const tt = (this.vy / VY_MAX) * TILT_MAX, k = TILT_RATE * (light ? LIGHT_TILT : 1);
+    // gp1: flat ~0° while coasting; nose-up only while thrusting (ease with hold). Never sit ~45°.
+    const tt = thrusting ? -TILT_MAX * (0.55 + 0.45 * clamp(-this.vy / VY_MAX, 0, 1)) : 0;
+    const k = TILT_RATE * (light ? LIGHT_TILT : 1) * (thrusting ? 1 : 1.35);
     this.tilt += (tt - this.tilt) * Math.min(1, k * dt);
     if (this.shieldGrace > 0) this.shieldGrace -= dt;
     if (this.magnetT > 0) this.magnetT -= dt;
@@ -788,7 +801,11 @@
       for (let bi = 0; bi < this.haz.length; bi++) {
         const bh = this.haz[bi]; if (!bh.on || bh.kind !== 3) continue;
         const dx = bh.x - x, dy = bh.y - cy;
-        if (dx * dx + dy * dy < (bh.r + rr + 28) * (bh.r + rr + 28)) return false;
+        // satellites/debris must not sit on accretion ring (pullR), only clear past core before
+        const ringKeep = (name.indexOf("satellite") >= 0 || name.indexOf("telescope") >= 0 || name.indexOf("station") >= 0)
+          ? ((bh.pullR || BH_PULL_R) * 0.55 + rr)
+          : (bh.r + rr + 28);
+        if (dx * dx + dy * dy < ringKeep * ringKeep) return false;
       }
       this._hazard(name, x, cy, w, 1, 0, 0, zone);
       used.push(name);
@@ -849,8 +866,17 @@
       const nn = 6 + Math.floor(R() * 5), x0 = prevX + spacing * 0.3, step = 36, amp = 30 + R() * 40;
       for (let i = 0; i < nn; i++) {
         const uu = i / Math.max(1, nn - 1), x = x0 + i * step;
-        const base = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1);
-        this._pickup(0, x, base - Math.sin(uu * Math.PI) * amp);
+        let yy = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1) - Math.sin(uu * Math.PI) * amp;
+        // don't bait coin trails straight into an unmarked well
+        for (let bi = 0; bi < this.haz.length; bi++) {
+          const bh = this.haz[bi]; if (!bh.on || bh.kind !== 3) continue;
+          const dx = bh.x - x, dy = bh.y - yy, pr = (bh.pullR || BH_PULL_R) * 0.7;
+          if (dx * dx + dy * dy < pr * pr) {
+            const away = yy < bh.y ? -1 : 1;
+            yy = clamp(bh.y + away * (pr + 36), 90, WORLD_H - 90);
+          }
+        }
+        this._pickup(0, x, yy);
       }
     }
     if (this.gateN % T.fuelN === 0) this._pickup(1, gx, c);
@@ -1015,7 +1041,7 @@
   };
   P._crash = function (nodeIdx, edge) {
     if (this.crashed) return;
-    this.crashed = true; this.crashT = 0; this.crashEdge = edge; this.deathKind = "crash";
+    this.crashed = true; this.crashT = 0; this.crashEdge = edge; this.deathKind = "crash"; this._crashSparked = false;
     // crash point = the nose (pack frames put it at (230,150))
     const spr = this.sp.rocket, c = Math.cos(this.tilt), s = Math.sin(this.tilt), dx = spr.w / 2 - 4;
     this.crashX = this.px + c * dx; this.crashY = this.py + s * dx;
@@ -1105,8 +1131,18 @@
     x.setTransform(s, 0, 0, s, 0, oy);
     if (this.letterbox) this._drawLetterbox(x, s, oy);
     x.save(); x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
-    if (this.phase === "climb" || (this.phase === "pitch" && this.phaseT < 0.0001)) this._drawClimb(x);
-    else this._drawFlight(x);
+    if (this.phase === "climb") {
+      this._drawClimb(x);
+    } else if (this.phase === "pitch" && this.phaseT < PITCH_XFADE) {
+      // soft seam: starfield under, climb column fades out (no gantry-into-void pop)
+      this._drawFlight(x);
+      const a = 1 - ease(this.phaseT / PITCH_XFADE);
+      x.save(); x.globalAlpha = a;
+      this._drawClimb(x);
+      x.restore();
+    } else {
+      this._drawFlight(x);
+    }
     x.restore();
     if (this.letterbox) { // band edges = crash lines
       x.fillStyle = "rgba(100,210,255,0.55)"; x.fillRect(0, -3, VW, 3); x.fillRect(0, WORLD_H, VW, 3);
@@ -1150,9 +1186,11 @@
   P._drawClimb = function (x) {
     // world column [orbit tile 720 | climb bridge 1440 | pad plate 720]; camera top 2160 -> 0
     const VW = this.viewW, colScale = Math.max(1, VW / 1280), ox = (VW - 1280 * colScale) / 2;
-    const u = this.phaseT / CLIMB_T;
-    const z = 1 + 1.25 * (1 - ease(u / 0.25));      // pad scale -> flight scale in the first 0.6 s
-    const rx = VW / 2, ry = 430;
+    const u = this.phase === "climb" ? this.phaseT / CLIMB_T : 1;
+    const z = 1 + 1.25 * (1 - ease(Math.min(1, u / 0.25)));      // pad scale -> flight scale in the first 0.6 s
+    const sh = this._climbShake || 0;
+    const rx = VW / 2 + (sh ? (Math.sin(this.t * 47) * sh) : 0);
+    const ry = 430 + (sh ? (Math.cos(this.t * 53) * sh * 0.55) : 0);
     x.save();
     x.translate(rx, ry); x.scale(z, z); x.translate(-rx, -ry);
     const top = -this.camY * colScale;
@@ -1160,8 +1198,15 @@
     if (orbit) x.drawImage(orbit, ox, top, 1280 * colScale, 720 * colScale);
     if (bridge) x.drawImage(bridge, ox, top + 720 * colScale, 1280 * colScale, 1440 * colScale);
     if (this._pad) x.drawImage(this._pad, 0, 0, this._pad.width, this._pad.height, ox, top + 2160 * colScale, 1280 * colScale, 720 * colScale);
-    // rocket nose-up at (VW/2, 430), flame on
-    this._drawRocket(x, rx, ry, -Math.PI / 2, 1, true);
+    // rocket nose-up at (VW/2, 430), big climb plume
+    this._drawRocket(x, rx, ry, -Math.PI / 2, 1, true, CLIMB_PLUME);
+    // cheap motion blur streak behind plume (power read)
+    if (sh > 0.4) {
+      x.save(); x.globalAlpha = 0.18;
+      x.fillStyle = "#FF8C1C";
+      x.fillRect(rx - 10, ry + 90, 20, 70 + sh * 8);
+      x.restore();
+    }
     x.restore();
   };
   P._drawFlight = function (x) {
@@ -1203,12 +1248,32 @@
         const im = this._get(h.im); if (!im) continue;
         const sx = h.x - cam * h.par;
         if (sx + h.dw < -50 || sx - h.dw > VW + 50) continue;
+        const deadly = h.par === 1 && (h.kind === 3 || h.kind === 2 || (h.im && (h.im.indexOf("asteroid") === 0 || h.im.indexOf("hazard-") === 0)));
+        const decorPlanet = h.par !== 1;
         if (h.kind === 3 || h.rot) {
           x.save(); x.translate(sx, h.y); x.rotate(h.rot || 0);
+          if (deadly && h.kind !== 3) { // silhouette before sprite (BH has own core ring in pull VFX)
+            x.strokeStyle = "rgba(255, 210, 140, 0.55)"; x.lineWidth = 3;
+            x.beginPath(); x.arc(0, 0, Math.max(h.r * 1.15, h.dw * 0.28), 0, Math.PI * 2); x.stroke();
+          }
           x.drawImage(im, Math.round(-h.ox), Math.round(-h.oy), Math.round(h.dw), Math.round(h.dh));
+          if (h.kind === 3) { // always-on core/ring telegraph at phone size
+            x.strokeStyle = "rgba(200,160,255,0.75)"; x.lineWidth = 2.5;
+            x.beginPath(); x.arc(0, 0, Math.max(16, h.r * 1.05), 0, Math.PI * 2); x.stroke();
+            x.strokeStyle = "rgba(120,80,220,0.35)"; x.lineWidth = 1.5;
+            x.beginPath(); x.arc(0, 0, Math.max(28, h.dw * 0.42), 0, Math.PI * 2); x.stroke();
+          }
           x.restore();
         } else {
+          if (deadly) {
+            x.save();
+            x.strokeStyle = "rgba(255, 200, 120, 0.5)"; x.lineWidth = 2.5;
+            x.beginPath(); x.arc(sx, h.y, Math.max(h.r * 1.1, Math.min(h.dw, h.dh) * 0.32), 0, Math.PI * 2); x.stroke();
+            x.restore();
+          }
+          x.globalAlpha = decorPlanet ? 0.92 : 1;
           x.drawImage(im, Math.round(sx - h.ox), Math.round(h.y - h.oy), Math.round(h.dw), Math.round(h.dh));
+          x.globalAlpha = 1;
         }
         if (this.cfg && this.cfg.debugHitbox && h.kind === 3) {
           x.save();
@@ -1240,7 +1305,19 @@
           x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
         }
       }
-      this._drawRocket(x, this.px, this.py, this.tilt, 1, (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
+      const thrusting = (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0);
+      this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1))) : 1);
+      // exhaust sparks from engine nozzles only (gp1 P1#11)
+      if (thrusting && (this.phase === "flight" || this.phase === "practice") && (Math.floor(this.t * 40) % 2 === 0)) {
+        const nos = (this.sp && this.sp.nozzles) || [{ y: 0, s: 1 }];
+        const c = Math.cos(this.tilt), s = Math.sin(this.tilt);
+        const w = this.sp.rocket.w;
+        for (let ni = 0; ni < nos.length; ni++) {
+          const lx = -w / 2 - 8, ly = nos[ni].y;
+          const wx = this.px + c * lx - s * ly, wy = this.py + s * lx + c * ly;
+          this._spark(wx, wy, 0, 1, 90);
+        }
+      }
     } else if (this.deathKind === "swallow") {
       // Spinning shrink into core — rocket only, no crash frames / debris / boom art
       if (this.swallowScale > 0.04) {
@@ -1259,11 +1336,8 @@
       x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
       x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
     }
-    // cheap pull vignette (skip-heavy; soft-R scoped visual only — pull itself is global)
-    if (this._bhInPull && !this.crashed) {
-      x.fillStyle = "rgba(40,10,60,0.12)";
-      x.fillRect(0, 0, VW, WORLD_H);
-    }
+    // BH pull cue: dark vignette + purple/blue swirl (NOT brown/orange dirt wash) — soft-R scoped
+    if (this._bhInPull && !this.crashed) this._drawBhPullVfx(x, VW);
     // crash dim
     if (this.crashed && this.deathKind === "swallow") {
       // mild vignette as we fall in — no explosion dim
@@ -1294,7 +1368,7 @@
     const w = Math.max(1280, VW), ox = (VW - w) / 2;
     x.drawImage(im, 0, 0, im.width, im.height, Math.round(ox), Math.round(y), w, im.height);
   };
-  P._drawRocket = function (x, cx, cy, ang, a, flame) {
+  P._drawRocket = function (x, cx, cy, ang, a, flame, plumeScale) {
     const sp = this.sp, rk = sp.rocket;
     let im = rk.canvas, w = rk.w, h = rk.h, ay = rk.axisY, fx = 0;
     let frame = -1;
@@ -1303,7 +1377,7 @@
       if (frame >= 8) { frame = -1; if (sp.postImg) { const pi = this._get(sp.postImg); if (pi) { im = pi; fx = 1; } } else if (sp.post) { im = sp.post.canvas; } }
     }
     x.save(); x.translate(cx, cy); x.rotate(ang);
-    if (flame) this._drawFlame(x, -w / 2, 0);
+    if (flame) this._drawFlame(x, -w / 2, plumeScale || 1);
     if (frame >= 0 && sp.frames) { // pack frames: stack tail at x=0, stack top at origin y
       const f = this._get(sp.frames[frame]);
       if (f) x.drawImage(f, -w / 2, -ay - sp.origin[1]);
@@ -1324,12 +1398,60 @@
     x.restore();
   };
   P._payloadDrawable = function () { const sp = this.sp; if (sp.payload) return sp.payload.canvas; return sp.payloadImg ? this._get(sp.payloadImg) : null; };
-  P._drawFlame = function (x, tailX, y) {
+  // Flames in rocket-local space (after rotate) so side boosters track nozzles, not world-vertical.
+  P._drawFlame = function (x, tailX, plumeScale) {
+    const ps = plumeScale || 1;
+    const nos = (this.sp && this.sp.nozzles && this.sp.nozzles.length) ? this.sp.nozzles : [{ y: 0, s: 1 }];
     const fl = (Math.floor(this.t * 30) % 3);
-    const L = 26 + fl * 5;
-    x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - 6, L, 12);
-    x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - 5, L * 0.72, 10);
-    x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - 3, L * 0.42, 6);
+    for (let i = 0; i < nos.length; i++) {
+      const n = nos[i], y = n.y, sc = (n.s || 1) * ps;
+      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1);
+      const hw = Math.max(4, 6 * sc), hh = Math.max(3, 5 * sc);
+      x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw, L, hw * 2);
+      x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
+      x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
+      if (ps > 1.6) { // climb: white-hot core + longer tongue
+        x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
+      }
+    }
+  };
+  P._drawBhPullVfx = function (x, VW) {
+    // Find nearest BH for localized swirl (soft-R). Dark vignette + purple/blue — never dirt wash.
+    let best = null, bestD = 1e9;
+    const cam = this.cam;
+    for (let i = 0; i < this.haz.length; i++) {
+      const h = this.haz[i]; if (!h.on || h.kind !== 3) continue;
+      const hx = h.x - cam * h.par, dx = hx - this.px, dy = h.y - this.py;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestD) { bestD = d; best = h; }
+    }
+    // screen-wide soft darkening (cool purple, low alpha)
+    x.fillStyle = "rgba(18, 6, 42, 0.16)";
+    x.fillRect(0, 0, VW, WORLD_H);
+    if (!best) return;
+    const hx = best.x - cam * best.par, hy = best.y;
+    const pr = best.pullR || BH_PULL_R;
+    const g = x.createRadialGradient(hx, hy, best.r * 0.6, hx, hy, pr);
+    g.addColorStop(0, "rgba(40, 0, 70, 0.0)");
+    g.addColorStop(0.35, "rgba(90, 40, 180, 0.14)");
+    g.addColorStop(0.7, "rgba(40, 80, 200, 0.18)");
+    g.addColorStop(1, "rgba(10, 20, 50, 0.0)");
+    x.fillStyle = g;
+    x.beginPath(); x.arc(hx, hy, pr, 0, Math.PI * 2); x.fill();
+    // spinning arc cues (readable at phone size)
+    x.save();
+    x.translate(hx, hy);
+    x.rotate((best.rot || 0) * 1.6 + this.t * 1.8);
+    x.strokeStyle = "rgba(160, 120, 255, 0.45)"; x.lineWidth = 2.5;
+    x.beginPath(); x.arc(0, 0, pr * 0.55, 0.15, 1.4); x.stroke();
+    x.strokeStyle = "rgba(80, 160, 255, 0.4)"; x.lineWidth = 2;
+    x.beginPath(); x.arc(0, 0, pr * 0.78, 2.0, 3.4); x.stroke();
+    x.strokeStyle = "rgba(200, 160, 255, 0.28)"; x.lineWidth = 1.5;
+    x.beginPath(); x.arc(0, 0, pr * 0.92, 4.0, 5.5); x.stroke();
+    // bright core ring so BH doesn't blend into dust
+    x.strokeStyle = "rgba(220, 180, 255, 0.7)"; x.lineWidth = 2;
+    x.beginPath(); x.arc(0, 0, Math.max(18, best.r * 1.15), 0, Math.PI * 2); x.stroke();
+    x.restore();
   };
   P._drawDeployFx = function (x) {
     if (!this.deployed || this.deployT < 0) return;
@@ -1358,9 +1480,22 @@
   P._drawCrash = function (x) {
     const f = Math.min(7, Math.floor(this.crashT / CRASH_FRAME_S));
     const fr = this.sp.crash;
-    x.save(); x.translate(this.crashX, this.crashY); x.rotate(this.crashTilt);
+    const sc = 1.35; // gp1: bigger punch for Moon Giant–class stacks
+    x.save(); x.translate(this.crashX, this.crashY); x.rotate(this.crashTilt); x.scale(sc, sc);
     if (fr) { const im = typeof fr[f] === "string" ? this._get(fr[f]) : fr[f]; if (im) x.drawImage(im, -230, -150); }
+    // extra flash bloom first frames
+    if (f < 3) {
+      const R = BURST_R[f] * 1.1;
+      x.fillStyle = f === 0 ? "rgba(255,255,230,0.55)" : "rgba(255,140,40,0.28)";
+      x.beginPath(); x.arc(0, 0, R, 0, Math.PI * 2); x.fill();
+    }
     x.restore();
+    // world-space spark burst once
+    if (!this._crashSparked) {
+      this._crashSparked = true;
+      this._spark(this.crashX, this.crashY, 0, 28, 420);
+      this._spark(this.crashX, this.crashY, 1, 12, 320);
+    }
   };
 
   /* ---- first-flight overlay (art still; runtime dims + tip) ---- */
@@ -1421,7 +1556,7 @@
     for (let i = 0; i < 10; i++) { x.fillStyle = i < segs ? col : "#1c2f4c"; x.fillRect(38 + i * 16, 66, 13, 14); }
     if (this.shield || this.magnetT > 0) {
       let ix = 214;
-      if (this.shield) { const im = this._get("shield.png"); if (im) x.drawImage(im, ix, 58, 28, 30); ix += 34; }
+      if (this.shield) { const im = this._get("shield.png"); if (im) x.drawImage(im, ix, 52, 40, 42); ix += 46; }
       if (this.magnetT > 0) { const im = this._get("magnet.png"); if (im) x.drawImage(im, ix, 58, 29, 30); }
     }
     // zone banner: in 0.25 s / hold 1.5 s / out 0.25 s
@@ -1459,7 +1594,17 @@
     const lit = MB.light(st, lc, L.kitMean, L.kitStd);
     const rocket = toFlightSprite(st, lit, null, ROCKET_LEN);
     const key = ids.join(",") + "|" + (build.sides ? 1 : 0), pack = PACK_STACKS[key] || null;
-    const out = { rocket, post: null, payload: null, frames: null, origin: null, crash: null, packKey: pack ? pack.key : null, mode: "" };
+    // nozzle Y offsets in flight-local space (nose-right): upright +x → flight +y after CW rotate
+    const nozzles = [{ y: 0, s: 1 }];
+    if (build.sides) {
+      const k = rocket.scale;
+      for (let li = 0; li < st.layers.length; li++) {
+        const Ly = st.layers[li]; if (Ly.kind !== "side") continue;
+        const midX = Ly.x + Ly.w / 2;
+        nozzles.push({ y: (midX - st.axisX) * k, s: 0.55 });
+      }
+    }
+    const out = { rocket, post: null, payload: null, frames: null, origin: null, crash: null, packKey: pack ? pack.key : null, mode: "", nozzles };
     // layer index -> piece id: payload layers are the payload piece + its frustum join
     const isPayloadLayer = (i) => { const Ly = st.layers[i]; return build.payload && (Ly.name === build.payload || (Ly.kind === "frustum" && Ly.joinOf === build.payload)); };
     if (pack) {
@@ -1531,6 +1676,8 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
+      // gp1-beta seam / tilt
+      CLIMB_T, PITCH_T, PITCH_XFADE, TILT_MAX, TILT_RATE, CLIMB_PLUME, CLIMB_SHAKE,
       // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
       BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,

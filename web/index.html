@@ -13,7 +13,7 @@
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
-  <link rel="manifest" href="manifest.webmanifest?v=flight2d" />
+  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta" />
   <title>Launch Pad</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
@@ -266,6 +266,11 @@
     #flDeploy.disabled { border-color: #5b6470; background: rgba(40,44,52,.75); color: #8a929c; box-shadow: none; }
     #flDeploy.disabled img, #flDeploy.used img { filter: grayscale(1) brightness(.8); }
     #flDeploy.used { opacity: .7; } #flDeploy .ck { color: #5CFF7A; } #flDeploy .lk { font-size: .8em; }
+    /* gp1 chrome tax: locked DEPLOY = icon-only compact; full when ready/used */
+    #flDeploy.disabled { gap: 0; padding: 0; min-width: 0; }
+    #flDeploy.disabled .t { display: none; }
+    #flDeploy.disabled img { height: 70%; }
+    #fbBtn { opacity: .72; transform: scale(0.92); transform-origin: top right; }
     @keyframes rbBlink { 0% { outline: 1px solid #A0EBFF; outline-offset: 1px; } 50% { outline: 0 solid transparent; } }
     #flPause { font-size: 18px; }
     #pauseBox, #nameModal { position: fixed; inset: 0; z-index: 55; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
@@ -409,9 +414,9 @@
 
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=audio1"></script>
-  <script src="audio.js?v=flight2d"></script>
-  <script src="liftoff.js?v=flight2d"></script>
-  <script src="flight.js?v=flight2d"></script>
+  <script src="audio.js?v=gp1-beta"></script>
+  <script src="liftoff.js?v=gp1-beta"></script>
+  <script src="flight.js?v=gp1-beta"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -419,7 +424,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "flight2d";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -463,7 +468,9 @@
     window.addEventListener("resize", () => updateTrayHint());
     $("trayL").addEventListener("click", () => trayEl.scrollBy({ left: -Math.round(trayEl.clientWidth * 0.7), behavior: "smooth" }));
     $("trayR").addEventListener("click", () => trayEl.scrollBy({ left: Math.round(trayEl.clientWidth * 0.7), behavior: "smooth" }));
-    $("buildLabel").textContent = APP_VER;
+    // gp1-beta: strip debug build label from beta builds (feedback chip stays)
+    $("buildLabel").textContent = "";
+    $("buildLabel").style.display = "none";
 
     /* ---------- friend-trial: first-screen hint (once) ---------- */
     const LS = { get: (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } },
@@ -546,9 +553,24 @@
     SLOTS.forEach((s) => {
       const b = document.createElement("button");
       b.type = "button"; b.dataset.slot = s.key; b.textContent = s.label;
-      b.addEventListener("click", () => { state.step = s.key; state.swapSlot = null; renderBuilder(); paintStack(); });
+      b.addEventListener("click", () => {
+        if (s.key === "sides" && !boostersUnlocked()) return;
+        state.step = s.key; state.swapSlot = null; renderBuilder(); paintStack();
+      });
       stepsEl.appendChild(b);
     });
+
+    // gp1 P1#8: soft-collapse advanced assemble (boosters) until after first fly — don't brick configs
+    function boostersUnlocked() {
+      if (state.build && state.build.sides) return true; // already configured — never brick
+      return LS.get("rb_first_fly_done") === "1" || sessionStorage.getItem("rb_flew_session") === "1";
+    }
+    function syncBoosterStepVisibility() {
+      [...stepsEl.children].forEach((el) => {
+        if (el.dataset.slot === "sides") el.style.display = boostersUnlocked() ? "" : "none";
+      });
+      if (state.step === "sides" && !boostersUnlocked()) state.step = "payload";
+    }
 
     function usesEmptyPad() { const p = state.phase; return p === "assemble" || p === "grounded" || p === "liftoff"; }
     function plateSrc() {
@@ -637,7 +659,7 @@
     function traysFor(slot) {
       if (slot === "sides") return [
         { id: "__none", label: "No side boosters", imgs: [] },
-        { id: "__pair", label: `${lbl(SIDE_IDS[0])} + ${lbl(SIDE_IDS[1])}`, imgs: SIDE_IDS.map((i) => KIT.pieces[i].src) },
+        { id: "__pair", label: "Left + Right", imgs: SIDE_IDS.map((i) => KIT.pieces[i].src) },
       ];
       const t = SLOTS.find((s) => s.key === slot).type;
       return KIT.kit.pieces.filter((p) => p.type === t).map((p) => ({ id: p.id, label: p.label, imgs: [KIT.pieces[p.id].src] }));
@@ -648,10 +670,11 @@
       return b[slot] === id;
     }
     function nextStep(b, slot) {
-      if (slot === "s1") return b.upper ? (isComplete(b) ? "sides" : "payload") : "upper";
-      if (slot === "upper") return M()[b.upper].selfTopped ? "sides" : (b.payload ? "sides" : "payload");
-      if (slot === "payload") return "sides";
-      return "sides";
+      const sidesNext = () => (boostersUnlocked() ? "sides" : (isComplete(b) ? "payload" : "payload"));
+      if (slot === "s1") return b.upper ? (isComplete(b) ? sidesNext() : "payload") : "upper";
+      if (slot === "upper") return M()[b.upper].selfTopped ? sidesNext() : (b.payload ? sidesNext() : "payload");
+      if (slot === "payload") return sidesNext();
+      return sidesNext();
     }
     function updateTrayHint() {
       const w = document.getElementById("trayWrap"); if (!w) return;
@@ -660,16 +683,22 @@
       w.classList.toggle("moreR", max > 2 && t.scrollLeft < max - 2);
     }
     function setReason(txt, cls) { reasonEl.textContent = txt || ""; reasonEl.className = cls || ""; }
+    function nick(id) {
+      if (!id || !KIT) return id || "";
+      const L = (M()[id] && M()[id].label) || lbl(id) || id;
+      // short nick: drop repeated family words / "Booster"/"Stage" clutter
+      return String(L)
+        .replace(/\b(Stage|Booster|Fairing|Core|Ship)\b/gi, "")
+        .replace(/\s+/g, " ").trim() || L;
+    }
     function summaryLine() {
       const b = state.build;
       if (!KIT) return "Loading kit\u2026";
       if (!b.s1) return "Pick a first stage";
-      const parts = idsOf(b).map(lbl);
-      let s = parts.join(" + ") + (b.sides ? " + side boosters" : "");
-      const H = stackHeight(b), sit = padCfg(TODS[state.todIndex].id).sitY;
-      void H; void sit;
-      if (!isComplete(b)) s += b.upper ? " \u00b7 add a payload" : " \u00b7 add an upper stage";
-      else s += " \u00b7 ready to launch";
+      const parts = idsOf(b).map(nick);
+      let s = parts.join(" + ") + (b.sides ? " + L/R" : "");
+      if (!isComplete(b)) s += b.upper ? " \u00b7 payload" : " \u00b7 upper";
+      else s += " \u00b7 ready";
       return s;
     }
 
@@ -693,6 +722,7 @@
 
     function renderBuilder() {
       const b = state.build;
+      syncBoosterStepVisibility();
       [...stepsEl.children].forEach((el) => {
         const k = el.dataset.slot;
         el.classList.toggle("active", k === state.step);
@@ -1097,10 +1127,28 @@
       state.phase = "grounded";
       render();
       flightPreload = getFlight().preload(TODS[state.todIndex].id).catch(() => {});
-      renderOps(0); await sleep(280);
-      renderOps(1); await sleep(280);
-      renderOps(2); await sleep(280);
-      renderOps(3); await sleep(200);
+      // gp1 P1#9: skip-after-first / one-tap skip on repeat grounded ritual same session
+      const skipRitual = sessionStorage.getItem("rb_ritual_done") === "1";
+      if (skipRitual) {
+        renderOps(3);
+        const skip = document.createElement("button");
+        skip.type = "button"; skip.className = "op big"; skip.textContent = "SKIP CHECKS";
+        skip.style.cssText = "cursor:pointer;border:1px solid #64D2FF;background:#123E6E;color:#E1F2FF;font-weight:800;";
+        opsEl.appendChild(skip);
+        let skipped = false;
+        const waitSkip = new Promise((res) => {
+          const t = setTimeout(() => res("auto"), 450);
+          skip.onclick = () => { skipped = true; clearTimeout(t); res("tap"); };
+        });
+        await waitSkip;
+        void skipped;
+      } else {
+        renderOps(0); await sleep(280);
+        renderOps(1); await sleep(280);
+        renderOps(2); await sleep(280);
+        renderOps(3); await sleep(200);
+        try { sessionStorage.setItem("rb_ritual_done", "1"); } catch (_) {}
+      }
       worldEl.classList.remove("assembleZoom");
       worldEl.style.transform = "";
       plateWrap.classList.remove("assembleOpen");
@@ -1145,9 +1193,13 @@
       window.__flight = flight;
       return flight;
     }
+    let lastFlightLayout = null;
     function layoutFlightUi(L) {
-      const hs = L.hs, dw = Math.round(190 * hs), dh = Math.round(60 * hs), pw = Math.round(46 * hs);
-      Object.assign(flDeploy.style, { width: dw + "px", height: dh + "px", fontSize: Math.round(22 * hs) + "px" });
+      lastFlightLayout = L;
+      const hs = L.hs, pw = Math.round(46 * hs);
+      const locked = flDeploy.classList.contains("disabled");
+      const dw = Math.round((locked ? 56 : 190) * hs), dh = Math.round((locked ? 56 : 60) * hs);
+      Object.assign(flDeploy.style, { width: dw + "px", height: dh + "px", fontSize: Math.round((locked ? 14 : 22) * hs) + "px" });
       Object.assign(flPause.style, { width: pw + "px", height: pw + "px" });
       const m = Math.round(14 * hs);
       if (L.letterbox) { // portrait: controls live in the letterbox, outside the play band
@@ -1203,8 +1255,10 @@
       if (flDeploy.dataset.st === st) return;
       flDeploy.dataset.st = st;
       flDeploy.className = "flBtn on " + st;
-      flDeploy.querySelector(".t").innerHTML = st === "used" ? 'DEPLOYED<span class="ck">\u2713</span>' : st === "ready" ? "DEPLOY" : 'DEPLOY <span class="lk">\u{1F512}\uFE0E</span>';
+      // locked = icon-only (text hidden via CSS); ready/used show full label
+      flDeploy.querySelector(".t").innerHTML = st === "used" ? 'DEPLOYED<span class="ck">\u2713</span>' : st === "ready" ? "DEPLOY" : "";
       flDeploy.setAttribute("aria-label", st === "used" ? "Payload deployed" : st === "ready" ? "Deploy payload" : "Deploy payload (available from 300 km)");
+      if (lastFlightLayout) layoutFlightUi(lastFlightLayout);
     }
     // Kill browser text selection / callouts on taps (keep chrome tray scrollable)
     const isEditable = (el) => !!(el && (el.closest && el.closest("textarea, input, [contenteditable=true]")));
@@ -1249,6 +1303,7 @@
 
     async function onGameOver(r) {
       holdIds.clear();
+      try { LS.set("rb_first_fly_done", "1"); sessionStorage.setItem("rb_flew_session", "1"); } catch (_) {}
       const b = state.build;
       const run = Object.assign({}, r, { stack: (idsOf(b).join(",") + (b.sides ? "+sides" : "")).slice(0, 120), tod: String(TODS[state.todIndex].id), build: APP_VER });
       lastRun = run; window.__lastRun = run;
