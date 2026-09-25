@@ -1156,16 +1156,16 @@
     x.imageSmoothingEnabled = false;
     x.fillStyle = "#050a18"; x.fillRect(0, 0, this.canvas.width, this.canvas.height);
     x.setTransform(s, 0, 0, s, 0, oy);
-    // Letterbox bars ease in with lbA (solid dim — NO mirrored scrolling strip; that caused diagonal BL flow)
-    if (this.letterbox && lb > 0.001) this._drawLetterbox(x, lb);
     if (seam) {
-      // continuous seam: allow climb art to paint into letterbox zone while lbA is low (full-bleed feel)
+      // continuous seam: climb/pitch may paint full-bleed while lbA is low; letterbox drawn ON TOP after
       this._drawSeam(x);
     } else {
       x.save(); x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
       this._drawFlight(x);
       x.restore();
     }
+    // Solid dim bars ON TOP of world (no mirrored strip). Eases in as rocket settles flat.
+    if (this.letterbox && lb > 0.001) this._drawLetterbox(x, lb);
     if (this.letterbox && lb > 0.55) { // band edges = crash lines (only once letterbox has settled)
       const a = clamp((lb - 0.55) / 0.45, 0, 1) * 0.55;
       x.fillStyle = "rgba(100,210,255," + a.toFixed(3) + ")";
@@ -1181,36 +1181,28 @@
     x.fillStyle = "rgba(5,10,24," + a.toFixed(3) + ")";
     x.fillRect(0, -ext, VW, ext); x.fillRect(0, WORLD_H, VW, ext);
   };
-  // Continuous climb→pitch→flight: same camZoom for climb column + flight strip; column slides out (no alpha world-swap).
+  // Continuous climb→pitch→flight: one camZoom. Climb column through ascent; pitch continues on flight
+  // strip at the same zoom (orbit already reads as stars — no stacked climb overlay / hard seam line).
   P._drawSeam = function (x) {
     const VW = this.viewW;
     const zoom = this.camZoom || 1;
-    const exit = this.climbExit || 0;
-    // Flight starfield under (pitch only) at the SAME zoom as the climb column
-    if (this.phase === "pitch") {
-      x.save();
-      // soft clip to an expanding band so early pitch still feels full-bleed
+    if (this.phase === "climb") {
+      this._drawClimb(x, true);
+    } else {
+      // pitch: flight world under shared camZoom (pivoted on rocket inside _drawFlight)
       const pad = (1 - (this.lbA || 0)) * (this.oy / this.s + 8);
-      x.beginPath(); x.rect(0, -pad, VW, WORLD_H + 2 * pad); x.clip();
-      this._drawFlight(x, true); // world only — rocket drawn once below
-      x.restore();
-    }
-    // Climb column exits downward under same zoom (transform continuity, not crossfade)
-    if (exit < 0.998) {
-      const slide = exit * (WORLD_H * 1.05 + 160);
       x.save();
-      x.translate(0, slide);
-      this._drawClimb(x, true); // column + no rocket
+      x.beginPath(); x.rect(0, -pad, VW, WORLD_H + 2 * pad); x.clip();
+      this._drawFlight(x, true);
       x.restore();
     }
-    // Single rocket in seam camera space
+    // Single rocket in seam camera space — scale tracks camZoom continuously
     const thrusting = true;
     const plume = this.phase === "climb" ? CLIMB_PLUME
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
     const sh = this._climbShake || 0;
     const rx = this.px + (sh ? Math.sin(this.t * 47) * sh : 0);
     const ry = this.py + (sh ? Math.cos(this.t * 53) * sh * 0.55 : 0);
-    // Match climb column zoom around rocket so sprite scale tracks world scale-in
     x.save();
     x.translate(rx, ry); x.scale(zoom, zoom); x.translate(-rx, -ry);
     this._drawRocket(x, rx, ry, this.tilt, 1, thrusting, plume);
