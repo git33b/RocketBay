@@ -1,5 +1,5 @@
-/* RocketBay FLIGHT MODE v1 / flight2c live / bh1e (blackhole-v1)
- * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, +50% gravity over bh1d,
+/* RocketBay FLIGHT MODE v1 / flight2c live / bh1f-lab (blackhole-v1)
+ * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1f = 3× gravity over bh1e,
  * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH),
  * L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5; lab-only ~3 early burst.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
@@ -30,18 +30,18 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
-  // BLACKHOLE v1 / bh1e (named tunables — CoE playtest)
+  // BLACKHOLE v1 / bh1f (named tunables — CoE playtest; lab-only strong-G)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
-  // Base size as-is at early depth; draw+pullR grow with depth. Player pull +50% over bh1d.
+  // Base size as-is at early depth; draw+pullR grow with depth. Player pull 3× over bh1e.
   const BH_DRAW_SCALE = 1.0;             // native art — do NOT interim-upscale (would double-size)
   const BH_DRAW_W = 208;                 // base early-depth draw width (depth scale applies on top)
-  const BH_PULL_R = 444;                 // base soft radius matched to early visual
-  // bh1d BH_G=1490400. bh1e: +50% → 2235600. Soft radius / base art as-is at early depth.
-  const BH_G_PREV = 1490400;             // bh1d player pull (document before)
-  const BH_G_MULT = 1.5;                 // × vs bh1d BH_G (+50%)
-  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 2235600 — a = BH_G / (r^2 + BH_SOFT)
+  const BH_PULL_R = 520;                 // bh1e 444 → bh1f 520 (widen soft R so skim yanks before core)
+  // bh1e BH_G=2235600. bh1f: ×3 → 6706800. Soft R widened; base art as-is at early depth.
+  const BH_G_PREV = 2235600;             // bh1e player pull (document before)
+  const BH_G_MULT = 3;                   // × vs bh1e BH_G (exact 3× strong-G lab)
+  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 6706800 — a = BH_G / (r^2 + BH_SOFT)
   const BH_SOFT = 3200;                  // softens singularity near core
-  const BH_OTHER = 0.38;                 // was 0.36 @ bh1d; stay ~0.25–0.4× player; slight nudge
+  const BH_OTHER = 0.40;                 // was 0.38 @ bh1e; stay ~0.25–0.4× player; nudge with G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
   const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
   const BH_MIN_KM = 0;                   // bh1e: L1 allowed (was 95); no early wipe
@@ -569,7 +569,7 @@
     }
   };
 
-  // BLACKHOLE v1 / bh1e: rare well ahead of camera. Escape = skirt above/below.
+  // BLACKHOLE v1 / bh1f: rare well ahead of camera. Escape = skirt above/below.
   // Core-only death; arms/ring spin. Soft 1/r^2 pull inside per-BH pullR (depth-scaled).
   // Full path: random gaps, one-at-a-time, L1 gets 1–2. Lab: ~3 early sequential only.
   P._spawnBlackholes = function () {
@@ -1522,7 +1522,7 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
-      // BLACKHOLE tunables (bh1e dump)
+      // BLACKHOLE tunables (bh1f dump)
       BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
     },
