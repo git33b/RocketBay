@@ -1,6 +1,7 @@
-/* RocketBay FLIGHT MODE v1 / bh1b (blackhole-v1 branch)
- * flight-pack-v1.3.2 + BLACKHOLE v1 feel pass: native 216×212 BH, stronger gravity,
- * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH).
+/* RocketBay FLIGHT MODE v1 / bh1d (blackhole-v1 branch)
+ * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, stronger gravity (bh1d bump),
+ * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH),
+ * lab-only ~3 early sequential BH burst; full path stays rare one-at-a-time.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -29,20 +30,24 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
-  // BLACKHOLE v1 / bh1b (named tunables — CoE playtest)
+  // BLACKHOLE v1 / bh1d (named tunables — CoE playtest)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
-  // Stronger pull dials kept from feel pass; soft radius matches the larger well.
+  // Soft radius stays matched to art. Player pull bumped again so coast=death / skim=thrust fight.
   const BH_DRAW_SCALE = 1.0;             // native art — do NOT interim-upscale (would double-size)
   const BH_DRAW_W = 208;                 // ~2× bh1's 104 via larger native (was 104 @ 108px)
-  const BH_PULL_R = 444;                 // soft radius for larger well (was 240 @ bh1)
-  const BH_G_MULT = 1.8;                 // player pull × vs bh1 (target band 1.6–2.0)
-  const BH_G = Math.round(460000 * BH_G_MULT); // 828000 — a = BH_G / (r^2 + BH_SOFT)
+  const BH_PULL_R = 444;                 // soft radius matched to visual (unchanged vs bh1c)
+  // before bh1d: BH_G=828000 (BH_G_MULT 1.8 × bh1 base 460000). bh1d: ~1.8× current (band 1.6–2.0).
+  const BH_G_PREV = 828000;              // bh1b/c player pull (document before)
+  const BH_G_MULT = 1.8;                 // × vs bh1c BH_G (target band 1.6–2.0× current)
+  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 1490400 — a = BH_G / (r^2 + BH_SOFT)
   const BH_SOFT = 3200;                  // softens singularity near core
-  const BH_OTHER = 0.32;                 // other deadly haz/meteors ~0.25–0.4× player; rises with BH_G
+  const BH_OTHER = 0.36;                 // was 0.32 @ bh1c; stay ~0.25–0.4× player; rises with BH_G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
   const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
   const BH_MIN_KM = 95;                  // L1 rare/absent until ~this depth (or phaseT gate)
-  const BH_GAP0 = 26, BH_GAP1 = 12;      // seconds between BH spawns (L1 → deep)
+  const BH_GAP0 = 26, BH_GAP1 = 12;      // full-path seconds between BH (L1 → deep); nextBhAt ≈ max(8, gap)
+  const BH_LAB_BURST = 3;                // lab-only: ~3 early sequential BHs (one-at-a-time)
+  const BH_LAB_BURST_GAP0 = 3.2, BH_LAB_BURST_GAP1 = 5.8; // lab burst spacing after prev leaves
   const SIM_DT = 1 / 120;
   const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
   const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
@@ -278,7 +283,7 @@
       this.wantTutorial = false; this.tutorialDone = true;
       this.nextGateX = this.cam + Math.max(this.viewW, 760) * 0.4 + 80;
       this.nextMeteorAt = this.t + 1.2 + this._rand() * 0.8;
-      // bh1c: force first BH on-screen by ~5s (spawn timer 2–3.5s; X placed in-view)
+      // bh1d: first of lab burst on-screen by ~5s (timer 2–3.5s; X in-view); then ~2 more sequential
       this.nextBhAt = this.t + 2 + this._rand() * 1.5;
       this.bodyY = 720;
       this._log("lab", this.t);
@@ -557,34 +562,36 @@
 
   // BLACKHOLE v1: rare well ahead of the camera. Escape path = skirt above/below.
   // Core-only death circle; arms/ring cosmetic + spinning. Soft 1/r^2 pull inside BH_PULL_R.
+  // Full path: one-at-a-time, nextBhAt ≈ max(8, BH_GAP 12–26s), no chains. Lab: ~3 early sequential.
   P._spawnBlackholes = function () {
     if (this.t < this.nextBhAt) return;
     const R = () => this._rand();
     const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
     const force = !!(this.cfg && this.cfg.forceBh);
     const lab = !!(this.cfg && this.cfg.lab);
-    // L1 rare/absent unless forced for evidence
+    const labBurst = lab && this.bhN < BH_LAB_BURST;
+    // L1 rare/absent unless forced for evidence (lab / ?bhforce)
     if (!force && this.km() < BH_MIN_KM && this.phaseT < 18) {
       this.nextBhAt = this.t + 4 + R() * 4;
       return;
     }
-    // only one active BH at a time (keeps escape readable)
+    // only one active BH at a time (keeps escape readable; no overlapping wells)
     for (let i = 0; i < this.haz.length; i++) {
       if (this.haz[i].on && this.haz[i].kind === 3) {
-        this.nextBhAt = this.t + 6 + R() * 6;
+        // lab burst: poll soon so next fires right after current leaves; else defer
+        this.nextBhAt = labBurst ? Math.min(this.nextBhAt, this.t + 0.35) : (this.t + 6 + R() * 6);
         return;
       }
     }
     const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
-    // Schedule next attempt now; force/lab never silently skip this attempt
+    // Full path / post-burst: rare schedule. Lab burst overrides after successful spawn.
     this.nextBhAt = this.t + Math.max(8, gap);
     if (!force && !lab && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
 
     const drawW = BH_DRAW_W * (0.92 + R() * 0.16);
     const yMin = 110, yMax = WORLD_H - 110;
 
-    // bh1c: lab/forceBh place ON SCREEN (in front of rocket). Normal rare BH stays ahead of view.
-    // Root cause of CoE miss: prior X = cam+viewW+140 left sx≈900 off the right edge at spawn.
+    // lab/forceBh place ON SCREEN (in front of rocket). Normal rare BH stays ahead of view.
     let x;
     if (force || lab) {
       // Fixed-ish fraction of viewW so BH is visible without scrolling (~viewW*0.55–0.75)
@@ -630,6 +637,10 @@
       h.pullR = BH_PULL_R;
       this.bhN++;
       this._log("bh_spawn", this.t);
+      // lab burst: schedule next soon (~3–6s); one-at-a-time gate above waits until current leaves
+      if (lab && this.bhN < BH_LAB_BURST) {
+        this.nextBhAt = this.t + BH_LAB_BURST_GAP0 + R() * (BH_LAB_BURST_GAP1 - BH_LAB_BURST_GAP0);
+      }
     } else if (force || lab) {
       // Pool exhausted — retry very soon rather than wait full gap (must show BH by ~8s)
       this.nextBhAt = this.t + 0.25;
@@ -1497,6 +1508,13 @@
 
   global.RocketBayFlight = {
     FlightEngine, prepareStack, bonusFor, scoreFor,
-    CONST: { WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS, LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP, FUEL_DRAIN, FUEL_REFILL },
+    CONST: {
+      WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
+      LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
+      FUEL_DRAIN, FUEL_REFILL,
+      // BLACKHOLE tunables (bh1d dump)
+      BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
+      BH_MIN_KM, BH_GAP0, BH_GAP1, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
+    },
   };
 })(typeof window !== "undefined" ? window : globalThis);
