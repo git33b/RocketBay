@@ -1,7 +1,7 @@
-/* RocketBay FLIGHT MODE v1 / bh1d (blackhole-v1 branch)
- * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, stronger gravity (bh1d bump),
+/* RocketBay FLIGHT MODE v1 / bh1e (blackhole-v1 branch)
+ * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, +50% gravity over bh1d,
  * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH),
- * lab-only ~3 early sequential BH burst; full path stays rare one-at-a-time.
+ * L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5; lab-only ~3 early burst.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -30,25 +30,33 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
-  // BLACKHOLE v1 / bh1d (named tunables — CoE playtest)
+  // BLACKHOLE v1 / bh1e (named tunables — CoE playtest)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
-  // Soft radius stays matched to art. Player pull bumped again so coast=death / skim=thrust fight.
+  // Base size as-is at early depth; draw+pullR grow with depth. Player pull +50% over bh1d.
   const BH_DRAW_SCALE = 1.0;             // native art — do NOT interim-upscale (would double-size)
-  const BH_DRAW_W = 208;                 // ~2× bh1's 104 via larger native (was 104 @ 108px)
-  const BH_PULL_R = 444;                 // soft radius matched to visual (unchanged vs bh1c)
-  // before bh1d: BH_G=828000 (BH_G_MULT 1.8 × bh1 base 460000). bh1d: ~1.8× current (band 1.6–2.0).
-  const BH_G_PREV = 828000;              // bh1b/c player pull (document before)
-  const BH_G_MULT = 1.8;                 // × vs bh1c BH_G (target band 1.6–2.0× current)
-  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 1490400 — a = BH_G / (r^2 + BH_SOFT)
+  const BH_DRAW_W = 208;                 // base early-depth draw width (depth scale applies on top)
+  const BH_PULL_R = 444;                 // base soft radius matched to early visual
+  // bh1d BH_G=1490400. bh1e: +50% → 2235600. Soft radius / base art as-is at early depth.
+  const BH_G_PREV = 1490400;             // bh1d player pull (document before)
+  const BH_G_MULT = 1.5;                 // × vs bh1d BH_G (+50%)
+  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 2235600 — a = BH_G / (r^2 + BH_SOFT)
   const BH_SOFT = 3200;                  // softens singularity near core
-  const BH_OTHER = 0.36;                 // was 0.32 @ bh1c; stay ~0.25–0.4× player; rises with BH_G
+  const BH_OTHER = 0.38;                 // was 0.36 @ bh1d; stay ~0.25–0.4× player; slight nudge
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
   const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
-  const BH_MIN_KM = 95;                  // L1 rare/absent until ~this depth (or phaseT gate)
+  const BH_MIN_KM = 0;                   // bh1e: L1 allowed (was 95); no early wipe
   const BH_GAP0 = 26, BH_GAP1 = 12;      // full-path seconds between BH (L1 → deep); nextBhAt ≈ max(8, gap)
+  // Depth visual/pull scale (same art): early ~1.0 → mid ~1.25 → deep ~1.5
+  const BH_SCALE0 = 1.0, BH_SCALE1 = 1.25, BH_SCALE2 = 1.5;
   const BH_LAB_BURST = 3;                // lab-only: ~3 early sequential BHs (one-at-a-time)
   const BH_LAB_BURST_GAP0 = 3.2, BH_LAB_BURST_GAP1 = 5.8; // lab burst spacing after prev leaves
   const SIM_DT = 1 / 120;
+  // depth u (0..1 from speed) → draw/pull scale ~1.0 → 1.25 → 1.5
+  function bhDepthScale(u) {
+    const x = clamp(u, 0, 1);
+    if (x < 0.5) return BH_SCALE0 + (BH_SCALE1 - BH_SCALE0) * (x / 0.5);
+    return BH_SCALE1 + (BH_SCALE2 - BH_SCALE1) * ((x - 0.5) / 0.5);
+  }
   const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
   const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
   const TIERS = [ // pack tiers (speed band -> density)
@@ -402,7 +410,7 @@
         this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
         this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
         if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
-        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 14 + this._rand() * 10); }
+        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 5 + this._rand() * 8); // bh1e: L1 can see first hole ~5–13s }
       }
       return;
     }
@@ -440,7 +448,7 @@
         this.phase = "flight"; this.phaseT = 0; this.hazardsOn = true;
         this.nextGateX = this.cam + this.viewW * 0.45 + 120;
         this.nextMeteorAt = this.t + 1.8 + this._rand() * 1.2;
-        this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.5 : 12 + this._rand() * 10);
+        this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.5 : 5 + this._rand() * 8); // bh1e: post-tutorial early window
         this._log("hazards", this.t);
       }
       return;
@@ -560,9 +568,9 @@
     }
   };
 
-  // BLACKHOLE v1: rare well ahead of the camera. Escape path = skirt above/below.
-  // Core-only death circle; arms/ring cosmetic + spinning. Soft 1/r^2 pull inside BH_PULL_R.
-  // Full path: one-at-a-time, nextBhAt ≈ max(8, BH_GAP 12–26s), no chains. Lab: ~3 early sequential.
+  // BLACKHOLE v1 / bh1e: rare well ahead of camera. Escape = skirt above/below.
+  // Core-only death; arms/ring spin. Soft 1/r^2 pull inside per-BH pullR (depth-scaled).
+  // Full path: random gaps, one-at-a-time, L1 gets 1–2. Lab: ~3 early sequential only.
   P._spawnBlackholes = function () {
     if (this.t < this.nextBhAt) return;
     const R = () => this._rand();
@@ -570,11 +578,7 @@
     const force = !!(this.cfg && this.cfg.forceBh);
     const lab = !!(this.cfg && this.cfg.lab);
     const labBurst = lab && this.bhN < BH_LAB_BURST;
-    // L1 rare/absent unless forced for evidence (lab / ?bhforce)
-    if (!force && this.km() < BH_MIN_KM && this.phaseT < 18) {
-      this.nextBhAt = this.t + 4 + R() * 4;
-      return;
-    }
+    // bh1e: L1 allowed (BH_MIN_KM=0; no phaseT wipe). Keep one-at-a-time.
     // only one active BH at a time (keeps escape readable; no overlapping wells)
     for (let i = 0; i < this.haz.length; i++) {
       if (this.haz[i].on && this.haz[i].kind === 3) {
@@ -583,12 +587,15 @@
         return;
       }
     }
+    // Deeper = more often (gap 26→12). Random jitter keeps gaps unpredictable (not on a beat).
     const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
-    // Full path / post-burst: rare schedule. Lab burst overrides after successful spawn.
     this.nextBhAt = this.t + Math.max(8, gap);
-    if (!force && !lab && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
+    // First full-path BH always lands when due (guarantee L1 ≥1); later: mild random skip, less deep.
+    if (!force && !lab && this.bhN > 0 && R() > (0.55 + 0.35 * u)) return;
 
-    const drawW = BH_DRAW_W * (0.92 + R() * 0.16);
+    const dScale = bhDepthScale(u); // ~1.0 early → 1.25 mid → 1.5 deep
+    const pullR = BH_PULL_R * dScale;
+    const drawW = BH_DRAW_W * dScale * (0.92 + R() * 0.16);
     const yMin = 110, yMax = WORLD_H - 110;
 
     // lab/forceBh place ON SCREEN (in front of rocket). Normal rare BH stays ahead of view.
@@ -602,28 +609,28 @@
     }
 
     // Pick Y with skirt escape; for force/lab RETRY immediately — never defer past window
-    function clogAt(self, xx, yy) {
+    function clogAt(self, xx, yy, pr) {
       let clogTop = 0, clogBot = 0;
       for (let i = 0; i < self.haz.length; i++) {
         const o = self.haz[i]; if (!o.on || o.par !== 1 || o.kind === 3) continue;
-        if (Math.abs(o.x - xx) > BH_PULL_R * 0.85) continue;
+        if (Math.abs(o.x - xx) > pr * 0.85) continue;
         if (o.y < WORLD_H * 0.45) clogTop++; else clogBot++;
       }
       return { clogTop, clogBot };
     }
     let y = yMin + R() * (yMax - yMin);
     if (R() < 0.6) y = R() < 0.5 ? (yMin + R() * 160) : (yMax - R() * 160);
-    let { clogTop, clogBot } = clogAt(this, x, y);
+    let { clogTop, clogBot } = clogAt(this, x, y, pullR);
     if (clogTop >= 2 && clogBot < 2) y = Math.max(y, WORLD_H * 0.58);
     else if (clogBot >= 2 && clogTop < 2) y = Math.min(y, WORLD_H * 0.42);
     if (force || lab) {
       // up to 6 Y retries; if still clogged both skirts, force upper or lower skirt spawn
       for (let attempt = 0; attempt < 6; attempt++) {
-        ({ clogTop, clogBot } = clogAt(this, x, y));
+        ({ clogTop, clogBot } = clogAt(this, x, y, pullR));
         if (clogTop < 2 || clogBot < 2) break;
         y = attempt % 2 === 0 ? (yMin + R() * 140) : (yMax - R() * 140);
       }
-      ({ clogTop, clogBot } = clogAt(this, x, y));
+      ({ clogTop, clogBot } = clogAt(this, x, y, pullR));
       if (clogTop >= 2 && clogBot >= 2) {
         // hard skirt: place in less-clogged third so ONE escape path stays open
         y = clogTop <= clogBot ? (yMin + 40 + R() * 80) : (yMax - 40 - R() * 80);
@@ -634,7 +641,8 @@
     if (h) {
       h.kind = 3;
       h.rot = R() * Math.PI * 2;
-      h.pullR = BH_PULL_R;
+      h.pullR = pullR;
+      h.dScale = dScale;
       this.bhN++;
       this._log("bh_spawn", this.t);
       // lab burst: schedule next soon (~3–6s); one-at-a-time gate above waits until current leaves
@@ -655,7 +663,8 @@
       const hx = h.x - cam * h.par;
       const dx = hx - this.px, dy = h.y - this.py;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist >= BH_PULL_R || dist < 1) continue;
+      const pullR = h.pullR || BH_PULL_R;
+      if (dist >= pullR || dist < 1) continue;
       this._bhInPull = true;
       // radial accel toward core; player X is fixed so only vertical component fights thrust
       const a = BH_G / (dist * dist + BH_SOFT);
@@ -710,7 +719,7 @@
     // Never spawn a layout that starts with zero escape vs an active BH (closing over time OK)
     for (let i = 0; i < this.haz.length; i++) {
       const bh = this.haz[i]; if (!bh.on || bh.kind !== 3) continue;
-      if (Math.abs(bh.x - gx) > BH_PULL_R + 80) continue;
+      if (Math.abs(bh.x - gx) > (bh.pullR || BH_PULL_R) + 80) continue;
       // push gap centre away from BH core so a skirt lane exists at spawn
       const away = c < bh.y ? -1 : 1;
       const need = bh.r + gapH * 0.35 + 36;
@@ -900,7 +909,7 @@
           const bh = bhs[b];
           const dx = bh.x - h.x, dy = bh.y - h.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist >= BH_PULL_R || dist < 1) continue;
+          if (dist >= (bh.pullR || BH_PULL_R) || dist < 1) continue;
           const a = (BH_G * BH_OTHER) / (dist * dist + BH_SOFT);
           h.vx += a * (dx / dist) * dt;
           h.vy += a * (dy / dist) * dt;
@@ -1068,7 +1077,7 @@
         const preferUp = yh > WORLD_H * 0.5;
         const skirt = preferUp ? Math.min(yh - 140, 150) : Math.max(yh + 140, WORLD_H - 150);
         target = skirt;
-        if (Math.abs(yp - yh) < BH_PULL_R * 0.55) dodge += (yp < yh ? -1 : 1) * 120;
+        if (Math.abs(yp - yh) < (h.pullR || BH_PULL_R) * 0.55) dodge += (yp < yh ? -1 : 1) * 120;
         continue;
       }
       if (Math.abs(yp - yh) < h.r + 34) dodge += (yp < yh ? -1 : 1) * (h.r + 60);
@@ -1196,7 +1205,7 @@
           x.strokeStyle = "rgba(255,80,120,0.9)"; x.lineWidth = 2;
           x.beginPath(); x.arc(sx, h.y, h.r, 0, Math.PI * 2); x.stroke(); // CORE death
           x.strokeStyle = "rgba(180,100,255,0.35)"; x.lineWidth = 1;
-          x.beginPath(); x.arc(sx, h.y, BH_PULL_R, 0, Math.PI * 2); x.stroke(); // soft pull
+          x.beginPath(); x.arc(sx, h.y, h.pullR || BH_PULL_R, 0, Math.PI * 2); x.stroke(); // soft pull
           x.restore();
         }
       }
@@ -1512,9 +1521,9 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
-      // BLACKHOLE tunables (bh1d dump)
+      // BLACKHOLE tunables (bh1e dump)
       BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
-      BH_MIN_KM, BH_GAP0, BH_GAP1, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
+      BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
