@@ -1,5 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
- * GP1-BETA: pad→flight seam, tilt-on-thrust, climb plume, BH purple/blue pull VFX, bigger crash,
+ * GP1-BETA: continuous pad→flight scale-in seam, tilt-on-thrust, climb plume, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
@@ -18,8 +18,12 @@
   const MIN_VIEW_W = 760;                    // narrower screens (portrait) letterbox the band to show >= 760 px ahead
   const PLAYER_X = 285;                      // rocket centre x after pitch-over
   const ROCKET_LEN = 208;                    // flight sprite length (pack)
-  const CLIMB_T = 3.4, PITCH_T = 1.75;       // gp1-beta: longer climb hold + smoother pitch-over
-  const PITCH_XFADE = 0.42;                  // early pitch: crossfade climb column → starfield (no gantry pop)
+  const CLIMB_T = 3.4, PITCH_T = 2.05;       // gp1-beta reticket: climb hold + longer continuous scale-in pitch
+  const SEAM_ZOOM0 = 1.82;                   // pad liftoff framing (camera starts zoomed into pad/climb)
+  const SEAM_ZOOM1 = 1.28;                   // end-of-climb zoom — continuous into pitch scale-down
+  const LB_EASE_START = 0.18;                // letterbox begins as rocket settles mid-pitch
+  const LB_EASE_END = 0.92;                  // letterbox fully in before pitch ends
+  // (removed PITCH_XFADE — no alpha crossfade of two unrelated worlds)
   const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
   const TILT_MAX = 8 * Math.PI / 180, TILT_RATE = 7;     // gp1: ~0–8° nose-up while thrusting only
@@ -258,6 +262,10 @@
     this.oy = Math.round((ch - this.bandH) / 2);
     this.letterbox = this.oy > 4;
     this.hs = clamp(s * 1.15, 0.62, 1);             // HUD css px per design px
+    // Outside climb/pitch, letterbox amount tracks layout (seam drives lbA itself)
+    if (this.phase && this.phase !== "climb" && this.phase !== "pitch") {
+      this.lbA = this.letterbox ? 1 : 0;
+    }
     if (this.o.onLayout) this.o.onLayout({ oy: this.oy, bandH: this.bandH, letterbox: this.letterbox, hs: this.hs, cssW: cw, cssH: ch });
     this.ctx.imageSmoothingEnabled = false;
   };
@@ -272,6 +280,7 @@
     this.seed = cfg.seed >>> 0 || 1; this._r = this.seed;
     this.t = 0; this.phase = "climb"; this.phaseT = 0;
     this.cam = -1; this.camY = 2160; this.speed = 0; this.dist = 0; // dist = world px since km 0
+    this.camZoom = SEAM_ZOOM0; this.lbA = 0; this.climbExit = 0; // continuous seam camera
     this.px = 640; this.py = 430; this.vy = 0; this.tilt = -Math.PI / 2; this.holding = false; this._botHold = false;
     this.fuel = 1; this.coins = 0; this.deployed = false; this.deployKm = 0; this.bonus = 0; this.deployT = -1;
     this.crashed = false; this.crashT = 0; this.deathKind = null; this.swallowScale = 1; this.swallowBh = null; this.shield = false; this.shieldGrace = 0; this.magnetT = 0;
@@ -298,6 +307,7 @@
     if (cfg && cfg.lab) {
       this.phase = "flight"; this.phaseT = 0;
       this.cam = 0; this.camY = 0; this.dist = 0;
+      this.camZoom = 1; this.lbA = this.letterbox ? 1 : 0; this.climbExit = 1;
       this.px = PLAYER_X; this.py = 360; this.vy = 0; this.tilt = 0;
       this.speed = SPEED0; this.hazardsOn = true;
       this.wantTutorial = false; this.tutorialDone = true;
@@ -407,18 +417,32 @@
     const hold = this.bot ? this._botHold : this.holding;
     if (this.phase === "climb") {
       const u = this.phaseT / CLIMB_T;
-      this.camY = 2160 * (1 - ease(u));
+      const eu = ease(u);
+      this.camY = 2160 * (1 - eu);
+      // continuous camera zoom: pad framing → top-of-climb framing (same cam into pitch)
+      this.camZoom = SEAM_ZOOM0 + (SEAM_ZOOM1 - SEAM_ZOOM0) * eu;
+      this.lbA = 0; this.climbExit = 0;
+      this.px = this.viewW * 0.5; this.py = 430; this.tilt = -Math.PI / 2;
       // light climb shake + motion blur cue (matches pad power)
-      this._climbShake = CLIMB_SHAKE * (0.55 + 0.45 * Math.sin(this.t * 38)) * (1 - ease(u));
-      if (this.phaseT >= CLIMB_T) { this.phase = "pitch"; this.phaseT = 0; this.camY = 0; this.cam = -180; this._climbShake = 0; }
+      this._climbShake = CLIMB_SHAKE * (0.55 + 0.45 * Math.sin(this.t * 38)) * (1 - eu);
+      if (this.phaseT >= CLIMB_T) {
+        this.phase = "pitch"; this.phaseT = 0; this.camY = 0; this.cam = -180;
+        this.camZoom = SEAM_ZOOM1; this._climbShake = 0;
+      }
       return;
     }
     if (this.phase === "pitch") {
       const u = clamp(this.phaseT / PITCH_T, 0, 1);
       const eu = ease(u);
+      // one continuous camera: zoom into flight framing while rocket + scroll go flat/horizontal
+      this.camZoom = SEAM_ZOOM1 + (1 - SEAM_ZOOM1) * eu;
+      const lbU = clamp((u - LB_EASE_START) / Math.max(1e-6, LB_EASE_END - LB_EASE_START), 0, 1);
+      this.lbA = this.letterbox ? ease(lbU) : 0;
+      this.climbExit = eu; // climb column slides out under same zoom (no hard world swap)
       this.speed = SPEED0 * eu;
       this.cam += this.speed * dt;
-      this.px = 640 + (PLAYER_X - 640) * eu;
+      this.px = this.viewW * 0.5 + (PLAYER_X - this.viewW * 0.5) * eu;
+      this.py = 430 + (360 - 430) * eu;
       // smooth nose-up → flat; never snap
       this.tilt = -Math.PI / 2 * (1 - eu);
       this.bodyY = 720 + (105 - 720) * easeOut(u);
@@ -426,6 +450,7 @@
       if (this.phaseT >= PITCH_T) {
         // seed ~95 km so HUD matches leaving-atmosphere / Earth-limb look (gp1 P1#12)
         this.cam = 0; this.dist = 95 / KM_PER_PX; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
+        this.camZoom = 1; this.lbA = this.letterbox ? 1 : 0; this.climbExit = 1;
         this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
         if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
         else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 5 + this._rand() * 8); // bh1e: L1 can see first hole ~5–13s
@@ -1125,40 +1150,76 @@
   /* ---------------- rendering ---------------- */
   P._draw = function () {
     const x = this.ctx, s = this.s * this.dpr, oy = this.oy * this.dpr, VW = this.viewW;
+    const lb = this.lbA == null ? (this.letterbox ? 1 : 0) : this.lbA;
+    const seam = this.phase === "climb" || this.phase === "pitch";
     x.setTransform(1, 0, 0, 1, 0, 0);
     x.imageSmoothingEnabled = false;
     x.fillStyle = "#050a18"; x.fillRect(0, 0, this.canvas.width, this.canvas.height);
     x.setTransform(s, 0, 0, s, 0, oy);
-    if (this.letterbox) this._drawLetterbox(x, s, oy);
-    x.save(); x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
-    if (this.phase === "climb") {
-      this._drawClimb(x);
-    } else if (this.phase === "pitch" && this.phaseT < PITCH_XFADE) {
-      // soft seam: starfield under, climb column fades out (no gantry-into-void pop)
-      this._drawFlight(x);
-      const a = 1 - ease(this.phaseT / PITCH_XFADE);
-      x.save(); x.globalAlpha = a;
-      this._drawClimb(x);
-      x.restore();
+    // Letterbox bars ease in with lbA (solid dim — NO mirrored scrolling strip; that caused diagonal BL flow)
+    if (this.letterbox && lb > 0.001) this._drawLetterbox(x, lb);
+    if (seam) {
+      // continuous seam: allow climb art to paint into letterbox zone while lbA is low (full-bleed feel)
+      this._drawSeam(x);
     } else {
+      x.save(); x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
       this._drawFlight(x);
+      x.restore();
     }
-    x.restore();
-    if (this.letterbox) { // band edges = crash lines
-      x.fillStyle = "rgba(100,210,255,0.55)"; x.fillRect(0, -3, VW, 3); x.fillRect(0, WORLD_H, VW, 3);
+    if (this.letterbox && lb > 0.55) { // band edges = crash lines (only once letterbox has settled)
+      const a = clamp((lb - 0.55) / 0.45, 0, 1) * 0.55;
+      x.fillStyle = "rgba(100,210,255," + a.toFixed(3) + ")";
+      x.fillRect(0, -3, VW, 3); x.fillRect(0, WORLD_H, VW, 3);
     }
     this._drawHud(x);
     this._drawTutorial(x);
   };
-  P._drawLetterbox = function (x) {
-    // dim mirrored continuation of the zone art above/below the play band (not playable)
+  P._drawLetterbox = function (x, lbA) {
+    // Solid dim bars only. Prior mirrored _strip(scale 1,-1) + horizontal U scroll read as diagonal flow in phone corners.
     const VW = this.viewW, ext = this.oy / this.s + 4;
-    if (this.phase !== "climb") {
-      const U = this._artU();
-      x.save(); x.scale(1, -1); this._strip(x, U, VW, 0, 1); x.restore();
-      x.save(); x.translate(0, 2 * WORLD_H); x.scale(1, -1); this._strip(x, U, VW, 0, 1); x.restore();
+    const a = 0.92 * (lbA == null ? 1 : lbA);
+    x.fillStyle = "rgba(5,10,24," + a.toFixed(3) + ")";
+    x.fillRect(0, -ext, VW, ext); x.fillRect(0, WORLD_H, VW, ext);
+  };
+  // Continuous climb→pitch→flight: same camZoom for climb column + flight strip; column slides out (no alpha world-swap).
+  P._drawSeam = function (x) {
+    const VW = this.viewW;
+    const zoom = this.camZoom || 1;
+    const exit = this.climbExit || 0;
+    // Flight starfield under (pitch only) at the SAME zoom as the climb column
+    if (this.phase === "pitch") {
+      x.save();
+      // soft clip to an expanding band so early pitch still feels full-bleed
+      const pad = (1 - (this.lbA || 0)) * (this.oy / this.s + 8);
+      x.beginPath(); x.rect(0, -pad, VW, WORLD_H + 2 * pad); x.clip();
+      this._drawFlight(x, true); // world only — rocket drawn once below
+      x.restore();
     }
-    x.fillStyle = "rgba(5,10,24,0.72)"; x.fillRect(0, -ext, VW, ext); x.fillRect(0, WORLD_H, VW, ext);
+    // Climb column exits downward under same zoom (transform continuity, not crossfade)
+    if (exit < 0.998) {
+      const slide = exit * (WORLD_H * 1.05 + 160);
+      x.save();
+      x.translate(0, slide);
+      this._drawClimb(x, true); // column + no rocket
+      x.restore();
+    }
+    // Single rocket in seam camera space
+    const thrusting = true;
+    const plume = this.phase === "climb" ? CLIMB_PLUME
+      : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
+    const sh = this._climbShake || 0;
+    const rx = this.px + (sh ? Math.sin(this.t * 47) * sh : 0);
+    const ry = this.py + (sh ? Math.cos(this.t * 53) * sh * 0.55 : 0);
+    // Match climb column zoom around rocket so sprite scale tracks world scale-in
+    x.save();
+    x.translate(rx, ry); x.scale(zoom, zoom); x.translate(-rx, -ry);
+    this._drawRocket(x, rx, ry, this.tilt, 1, thrusting, plume);
+    if (sh > 0.4) {
+      x.save(); x.globalAlpha = 0.18; x.fillStyle = "#FF8C1C";
+      x.fillRect(rx - 10, ry + 90, 20, 70 + sh * 8);
+      x.restore();
+    }
+    x.restore();
   };
   // zone art strip at 0.25x: [tile 2560][transition 1280] per zone, looping 6 -> 1
   P._strip = function (x, U, VW, y, zoom) {
@@ -1183,38 +1244,39 @@
       sx += w; u += w;
     }
   };
-  P._drawClimb = function (x) {
+  P._drawClimb = function (x, worldOnly) {
     // world column [orbit tile 720 | climb bridge 1440 | pad plate 720]; camera top 2160 -> 0
-    const VW = this.viewW, colScale = Math.max(1, VW / 1280), ox = (VW - 1280 * colScale) / 2;
-    const u = this.phase === "climb" ? this.phaseT / CLIMB_T : 1;
-    const z = 1 + 1.25 * (1 - ease(Math.min(1, u / 0.25)));      // pad scale -> flight scale in the first 0.6 s
+    // Zoom comes from continuous seam cam (camZoom), not a separate competing curve.
+    const VW = this.viewW, colScale = Math.max(1, VW / 1280);
+    const zoom = this.camZoom || 1;
+    const ox = (VW - 1280 * colScale) / 2;
     const sh = this._climbShake || 0;
-    const rx = VW / 2 + (sh ? (Math.sin(this.t * 47) * sh) : 0);
-    const ry = 430 + (sh ? (Math.cos(this.t * 53) * sh * 0.55) : 0);
+    const rx = (this.px || VW / 2) + (sh ? (Math.sin(this.t * 47) * sh) : 0);
+    const ry = (this.py || 430) + (sh ? (Math.cos(this.t * 53) * sh * 0.55) : 0);
     x.save();
-    x.translate(rx, ry); x.scale(z, z); x.translate(-rx, -ry);
+    x.translate(rx, ry); x.scale(zoom, zoom); x.translate(-rx, -ry);
     const top = -this.camY * colScale;
     const orbit = this._get("bg-orbit-edge-tile.png"), bridge = this._get("climb-bridge-" + this.cfg.tod + ".png");
     if (orbit) x.drawImage(orbit, ox, top, 1280 * colScale, 720 * colScale);
     if (bridge) x.drawImage(bridge, ox, top + 720 * colScale, 1280 * colScale, 1440 * colScale);
     if (this._pad) x.drawImage(this._pad, 0, 0, this._pad.width, this._pad.height, ox, top + 2160 * colScale, 1280 * colScale, 720 * colScale);
-    // rocket nose-up at (VW/2, 430), big climb plume
-    this._drawRocket(x, rx, ry, -Math.PI / 2, 1, true, CLIMB_PLUME);
-    // cheap motion blur streak behind plume (power read)
-    if (sh > 0.4) {
-      x.save(); x.globalAlpha = 0.18;
-      x.fillStyle = "#FF8C1C";
-      x.fillRect(rx - 10, ry + 90, 20, 70 + sh * 8);
-      x.restore();
+    if (!worldOnly) {
+      this._drawRocket(x, rx, ry, this.tilt || -Math.PI / 2, 1, true, CLIMB_PLUME);
+      if (sh > 0.4) {
+        x.save(); x.globalAlpha = 0.18; x.fillStyle = "#FF8C1C";
+        x.fillRect(rx - 10, ry + 90, 20, 70 + sh * 8);
+        x.restore();
+      }
     }
     x.restore();
   };
-  P._drawFlight = function (x) {
+  P._drawFlight = function (x, worldOnly) {
     const VW = this.viewW, cam = this.cam;
-    // 1) zone art (0.25x); during pitch-over the climb column's scale eases back to 1
-    const colScale = Math.max(1, VW / 1280);
-    const zoom = this.phase === "pitch" ? colScale + (1 - colScale) * ease(this.phaseT / PITCH_T) : 1;
-    this._strip(x, this._artU(), VW, 0, zoom);
+    // 1) zone art (0.25x); pitch uses continuous seam camZoom pivoted on rocket (matches climb column)
+    const zoom = this.phase === "pitch" ? (this.camZoom || 1) : 1;
+    const seamZoom = zoom !== 1;
+    if (seamZoom) { x.save(); x.translate(this.px, this.py); x.scale(zoom, zoom); x.translate(-this.px, -this.py); }
+    this._strip(x, this._artU(), VW, 0, 1);
     // 2) far stars 0.1x (translucent; the pack's luma<90 mask is approximated by alpha)
     const st = this._get("parallax/far-stars-tile.png");
     if (st) {
@@ -1297,54 +1359,57 @@
         x.drawImage(im, Math.round(sx - p.ox), Math.round(p.y - p.oy + bob), Math.round(p.dw), Math.round(p.dh));
       }
     }
-    // 8) rocket / deploy / crash
-    if (!this.crashed) {
-      if (this.shield || this.shieldGrace > 0) {
-        if (!(this.shieldGrace > 0 && Math.floor(this.t * 12) % 2)) {
-          x.strokeStyle = "rgba(120,220,255,0.8)"; x.lineWidth = 3;
-          x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
+    if (seamZoom) x.restore();
+    // 8) rocket / deploy / crash (skipped when seam draws the rocket once under shared camZoom)
+    if (!worldOnly) {
+      if (!this.crashed) {
+        if (this.shield || this.shieldGrace > 0) {
+          if (!(this.shieldGrace > 0 && Math.floor(this.t * 12) % 2)) {
+            x.strokeStyle = "rgba(120,220,255,0.8)"; x.lineWidth = 3;
+            x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
+          }
         }
-      }
-      const thrusting = (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0);
-      this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1))) : 1);
-      // exhaust sparks from engine nozzles only (gp1 P1#11)
-      if (thrusting && (this.phase === "flight" || this.phase === "practice") && (Math.floor(this.t * 40) % 2 === 0)) {
-        const nos = (this.sp && this.sp.nozzles) || [{ y: 0, s: 1 }];
-        const c = Math.cos(this.tilt), s = Math.sin(this.tilt);
-        const w = this.sp.rocket.w;
-        for (let ni = 0; ni < nos.length; ni++) {
-          const lx = -w / 2 - 8, ly = nos[ni].y;
-          const wx = this.px + c * lx - s * ly, wy = this.py + s * lx + c * ly;
-          this._spark(wx, wy, 0, 1, 90);
+        const thrusting = (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0);
+        this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1))) : 1);
+        // exhaust sparks from engine nozzles only (gp1 P1#11)
+        if (thrusting && (this.phase === "flight" || this.phase === "practice") && (Math.floor(this.t * 40) % 2 === 0)) {
+          const nos = (this.sp && this.sp.nozzles) || [{ y: 0, s: 1 }];
+          const c = Math.cos(this.tilt), s = Math.sin(this.tilt);
+          const w = this.sp.rocket.w;
+          for (let ni = 0; ni < nos.length; ni++) {
+            const lx = -w / 2 - 8, ly = nos[ni].y;
+            const wx = this.px + c * lx - s * ly, wy = this.py + s * lx + c * ly;
+            this._spark(wx, wy, 0, 1, 90);
+          }
         }
+      } else if (this.deathKind === "swallow") {
+        // Spinning shrink into core — rocket only, no crash frames / debris / boom art
+        if (this.swallowScale > 0.04) {
+          x.save();
+          x.translate(this.px, this.py);
+          x.rotate(this.tilt);
+          x.scale(this.swallowScale, this.swallowScale);
+          this._drawRocket(x, 0, 0, 0, 1, false);
+          x.restore();
+        }
+      } else this._drawCrash(x);
+      this._drawDeployFx(x);
+      // FX sparks
+      for (let i = 0; i < this.fx.length; i++) {
+        const f = this.fx[i]; if (!f.on) continue;
+        x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
+        x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
       }
-    } else if (this.deathKind === "swallow") {
-      // Spinning shrink into core — rocket only, no crash frames / debris / boom art
-      if (this.swallowScale > 0.04) {
-        x.save();
-        x.translate(this.px, this.py);
-        x.rotate(this.tilt);
-        x.scale(this.swallowScale, this.swallowScale);
-        this._drawRocket(x, 0, 0, 0, 1, false);
-        x.restore();
-      }
-    } else this._drawCrash(x);
-    this._drawDeployFx(x);
-    // FX sparks
-    for (let i = 0; i < this.fx.length; i++) {
-      const f = this.fx[i]; if (!f.on) continue;
-      x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
-      x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+      // BH pull cue: dark vignette + purple/blue swirl (NOT brown/orange dirt wash) — soft-R scoped
+      if (this._bhInPull && !this.crashed) this._drawBhPullVfx(x, VW);
+      // crash dim
+      if (this.crashed && this.deathKind === "swallow") {
+        // mild vignette as we fall in — no explosion dim
+        const u = clamp(this.crashT / BH_SWALLOW_S, 0, 1);
+        x.fillStyle = "rgba(10,0,20," + (0.18 + 0.55 * u * u).toFixed(3) + ")";
+        x.fillRect(0, 0, VW, WORLD_H);
+      } else if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
     }
-    // BH pull cue: dark vignette + purple/blue swirl (NOT brown/orange dirt wash) — soft-R scoped
-    if (this._bhInPull && !this.crashed) this._drawBhPullVfx(x, VW);
-    // crash dim
-    if (this.crashed && this.deathKind === "swallow") {
-      // mild vignette as we fall in — no explosion dim
-      const u = clamp(this.crashT / BH_SWALLOW_S, 0, 1);
-      x.fillStyle = "rgba(10,0,20," + (0.18 + 0.55 * u * u).toFixed(3) + ")";
-      x.fillRect(0, 0, VW, WORLD_H);
-    } else if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
   };
   const COIN_IMG = ["coin_f0.png", "coin_f1.png", "coin_f2.png", "coin_f3.png", "coin_f4.png"];
   P._drawBody = function (x) {
@@ -1676,8 +1741,8 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
-      // gp1-beta seam / tilt
-      CLIMB_T, PITCH_T, PITCH_XFADE, TILT_MAX, TILT_RATE, CLIMB_PLUME, CLIMB_SHAKE,
+      // gp1-beta seam / tilt (continuous scale-in)
+      CLIMB_T, PITCH_T, SEAM_ZOOM0, SEAM_ZOOM1, LB_EASE_START, LB_EASE_END, TILT_MAX, TILT_RATE, CLIMB_PLUME, CLIMB_SHAKE,
       // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
       BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
