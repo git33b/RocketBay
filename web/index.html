@@ -310,7 +310,17 @@
       .panel h3 { font-size: 17px; margin-bottom: 3px; } #lbCard .btns button { padding: 8px 12px; }
     }
     body.inFlight #buildLabel { top: auto; bottom: calc(4px + env(safe-area-inset-bottom)); }
-  </style>
+  
+    /* bh-lab feel-test: hide pad/assemble chrome; flight canvas only */
+    body.bh-lab #assembleUI,
+    body.bh-lab #ops,
+    body.bh-lab #firstHint,
+    body.bh-lab #todRow,
+    body.bh-lab #launchBtn,
+    body.bh-lab #stackHud { display: none !important; }
+    body.bh-lab #chrome { pointer-events: none; }
+    body.bh-lab #soundBtn { pointer-events: auto; }
+</style>
 </head>
 <body>
   <div id="stage">
@@ -406,7 +416,9 @@
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "audio1";
     const PAD_VER = "pad5";
-    const APP_VER = "bh1";
+    // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
+    const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
+    const APP_VER = LAB ? "bh1-lab" : "bh1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1059,7 +1071,8 @@
     }
 
     // Sound: On by default, persisted (rb_sound = "1" | "0")
-    let soundOn = LS.get("rb_sound") !== "0";
+    let soundOn = LAB ? true : (LS.get("rb_sound") !== "0");
+    if (LAB) LS.set("rb_sound", "1");
     function renderSound() {
       soundBtn.classList.toggle("on", soundOn);
       soundBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
@@ -1163,13 +1176,14 @@
       // First-run tutorial (localStorage); ?tutorial=1 force, ?tutorial=0 skip
       const seen = LS.get("rb_ft_tutorial_seen") === "1";
       const forceTut = QS.get("tutorial") === "1";
-      const skipTut = QS.get("tutorial") === "0" || !!retry;
-      const showTut = forceTut || (!skipTut && !seen);
+      const skipTut = LAB || QS.get("tutorial") === "0" || !!retry;
+      const showTut = !LAB && (forceTut || (!skipTut && !seen));
       f.o.onTutorialDone = () => { LS.set("rb_ft_tutorial_seen", "1"); };
       f.start({
         sprites, tod: TODS[state.todIndex].id, seed, bot: window.__flightBot || buildBotCfg(),
-        forceBh: QS.has("bhforce") || QS.has("bh"), debugHitbox: QS.has("hitbox"),
-        tutorial: showTut,
+        forceBh: LAB || QS.has("bhforce") || QS.has("bh"), debugHitbox: QS.has("hitbox") || LAB,
+        tutorial: LAB ? false : showTut,
+        lab: LAB,
       });
       window.__flightInfo = { mode: sprites.mode, packKey: sprites.packKey, chain: f.chain.map((n) => [+n.x.toFixed(1), +n.y.toFixed(1), +n.r.toFixed(1)]), seed };
       flDeploy.classList.add("on"); flPause.classList.add("on");
@@ -1331,8 +1345,20 @@
         b.sides = QS.get("sides") === "1";
         state.build = b; state.step = isComplete(b) ? "sides" : (b.upper ? "payload" : b.s1 ? "upper" : "s1");
       }
-      rebuildRocket(null);
-      render();
+      if (LAB) {
+        // Steel Booster + Steel Ship, no sides — drop straight into endless flight
+        state.build = { s1: "steel-booster", upper: "steel-ship", payload: null, sides: false };
+        state.step = "sides";
+        document.body.classList.add("bh-lab");
+        hintEl && hintEl.classList.remove("on");
+        rebuildRocket(null);
+        render();
+        // skip assemble / pad / climb — startFlight handles lab skip inside engine
+        startFlight(false);
+      } else {
+        rebuildRocket(null);
+        render();
+      }
     }).catch((e) => { console.error(e); setReason("Kit failed to load", "warn"); });
   </script>
 </body>

@@ -264,6 +264,20 @@
     this._layout();
     this._preloadRest();
     this._audioStart();
+    // bh-lab: skip climb / pitch / tutorial / practice — endless scroller immediately
+    if (cfg && cfg.lab) {
+      this.phase = "flight"; this.phaseT = 0;
+      this.cam = 0; this.camY = 0; this.dist = 0;
+      this.px = PLAYER_X; this.py = 360; this.vy = 0; this.tilt = 0;
+      this.speed = SPEED0; this.hazardsOn = true;
+      this.wantTutorial = false; this.tutorialDone = true;
+      this.nextGateX = this.cam + Math.max(this.viewW, 760) * 0.4 + 80;
+      this.nextMeteorAt = this.t + 1.2 + this._rand() * 0.8;
+      // early BH within ~5–10s so pull/spin/debris drift are obvious
+      this.nextBhAt = this.t + 5 + this._rand() * 5;
+      this.bodyY = 720;
+      this._log("lab", this.t);
+    }
     if (!this.captureMode) { this.lastTs = 0; this._raf = requestAnimationFrame(this._boundFrame); }
     else this._draw();
   };
@@ -514,7 +528,7 @@
     }
     const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
     this.nextBhAt = this.t + Math.max(8, gap);
-    if (!force && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
+    if (!force && !(this.cfg && this.cfg.lab) && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
 
     const drawW = BH_DRAW_W * (0.92 + R() * 0.16);
     // Continuous Y anywhere on playable band — bias slightly so one skirt is always open
