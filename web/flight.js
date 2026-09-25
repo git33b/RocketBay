@@ -1,6 +1,6 @@
 /* RocketBay FLIGHT MODE v1 / bh1b (blackhole-v1 branch)
- * flight-pack-v1.3.2 + BLACKHOLE v1 feel pass: bigger on-screen BH + stronger gravity,
- * core-only hitbox, spin, soft 1/r^2 pull on player + lighter field pull on other hazards.
+ * flight-pack-v1.3.2 + BLACKHOLE v1 feel pass: native 216×212 BH, stronger gravity,
+ * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH).
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -29,18 +29,18 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
-  // BLACKHOLE v1 / bh1b feel pass (named tunables — CoE playtest)
-  // Interim draw-scale of current sprites/hazard-blackhole.png (~108px native).
-  // When architect gates a larger native sprite into that stable path, reset BH_DRAW_SCALE→1
-  // and retune BH_DRAW_W / SPR native size; pull mults stay independent.
-  const BH_DRAW_SCALE = 1.85;            // on-screen × vs bh1 (target band 1.7–2.0)
-  const BH_DRAW_W = Math.round(104 * BH_DRAW_SCALE); // 192 — typical on-screen width
-  const BH_PULL_R = Math.round(240 * BH_DRAW_SCALE); // 444 — soft radius tracks bigger well
+  // BLACKHOLE v1 / bh1b (named tunables — CoE playtest)
+  // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
+  // Stronger pull dials kept from feel pass; soft radius matches the larger well.
+  const BH_DRAW_SCALE = 1.0;             // native art — do NOT interim-upscale (would double-size)
+  const BH_DRAW_W = 208;                 // ~2× bh1's 104 via larger native (was 104 @ 108px)
+  const BH_PULL_R = 444;                 // soft radius for larger well (was 240 @ bh1)
   const BH_G_MULT = 1.8;                 // player pull × vs bh1 (target band 1.6–2.0)
   const BH_G = Math.round(460000 * BH_G_MULT); // 828000 — a = BH_G / (r^2 + BH_SOFT)
   const BH_SOFT = 3200;                  // softens singularity near core
   const BH_OTHER = 0.32;                 // other deadly haz/meteors ~0.25–0.4× player; rises with BH_G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
+  const BH_SWALLOW_S = 0.55;             // suck-in duration before result (0.4–0.7s band)
   const BH_MIN_KM = 95;                  // L1 rare/absent until ~this depth (or phaseT gate)
   const BH_GAP0 = 26, BH_GAP1 = 12;      // seconds between BH spawns (L1 → deep)
   const SIM_DT = 1 / 120;
@@ -98,8 +98,8 @@
     "hazard-wreckage_2": [71, 50, 33.0, 24.6, 16.2],
     // flight-pack-v1.3.2 meteor (rock body hitbox; fiery tail NON-colliding)
     "hazard-meteor": [64, 40, 22.0, 22.0, 12.0],
-    // BLACKHOLE v1: native 108×106; hitbox = dark CORE only (~r20); arms/ring NON-colliding
-    "hazard-blackhole": [108, 106, 54.0, 53.0, 20.0],
+    // BLACKHOLE v1: native 216×212; hitbox = dark CORE only (~r40 = 2× prior); arms/ring NON-colliding
+    "hazard-blackhole": [216, 212, 108.0, 106.0, 40.0],
   };
   // pack deploy / crash frame sets (manifest flight-pack-v1.deploy / .crash; steel regenerated in v1.1)
   const PACK_STACKS = {
@@ -249,7 +249,7 @@
     this.cam = -1; this.camY = 2160; this.speed = 0; this.dist = 0; // dist = world px since km 0
     this.px = 640; this.py = 430; this.vy = 0; this.tilt = -Math.PI / 2; this.holding = false; this._botHold = false;
     this.fuel = 1; this.coins = 0; this.deployed = false; this.deployKm = 0; this.bonus = 0; this.deployT = -1;
-    this.crashed = false; this.crashT = 0; this.shield = false; this.shieldGrace = 0; this.magnetT = 0;
+    this.crashed = false; this.crashT = 0; this.deathKind = null; this.swallowScale = 1; this.swallowBh = null; this.shield = false; this.shieldGrace = 0; this.magnetT = 0;
     this.nextGateX = 900; this.gateN = 0; this.lastGapC = 360; this.nextExtraX = 1200;
     this.planetBlock = { top0: 0, top1: -1, topY: 0, bot0: 0, bot1: -1, botY: 720 };
     this.zoneIdx = 0; this.bannerT = -10; this.bannerZone = 0; this.comet = { on: false, x: 0, y: 0 }; this.cometZone = -1;
@@ -311,7 +311,24 @@
     const a = this.o.getAudio && this.o.getAudio(), RA = global.RocketBayAudio;
     if (!a || !RA || this.captureMode) return;
     const t = a.ctx.currentTime + 0.005;
-    try { if (kind === "deploy") RA.deployPop(a.ctx, a.chain.input, t); else if (kind === "crash") { RA.crashBoom(a.ctx, a.chain.input, t); this._audioStop(0.25); } } catch (_) {}
+    try {
+      if (kind === "deploy") RA.deployPop(a.ctx, a.chain.input, t);
+      else if (kind === "crash") { RA.crashBoom(a.ctx, a.chain.input, t); this._audioStop(0.25); }
+      else if (kind === "bh_swallow") {
+        // short descending whoosh — no crash boom
+        const ctx = a.ctx, dest = a.chain.input;
+        const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+        o.type = "sawtooth"; f.type = "lowpass"; f.frequency.setValueAtTime(900, t);
+        f.frequency.exponentialRampToValueAtTime(120, t + 0.45);
+        o.frequency.setValueAtTime(380, t);
+        o.frequency.exponentialRampToValueAtTime(48, t + 0.5);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.16, t + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+        o.connect(f); f.connect(g); g.connect(dest);
+        o.start(t); o.stop(t + 0.58);
+      }
+    } catch (_) {}
   };
   P._log = function (type, t, on) { if (this.events.length < 4000) this.events.push({ type: type, t: +t.toFixed(4), on: on }); };
 
@@ -426,6 +443,24 @@
     // ---- flight / crash ----
     if (this.crashed) {
       this.crashT += dt;
+      if (this.deathKind === "swallow") {
+        const bh = this.swallowBh;
+        const hx = bh && bh.on ? (bh.x - this.cam * (bh.par || 1)) : this.swallowPx;
+        const hy = bh && bh.on ? bh.y : this.swallowPy;
+        const u = clamp(this.crashT / BH_SWALLOW_S, 0, 1);
+        const e = u * u * (3 - 2 * u); // smoothstep
+        this.px = this.swallowPx + (hx - this.swallowPx) * e;
+        this.py = this.swallowPy + (hy - this.swallowPy) * e;
+        this.tilt = this.swallowTilt + u * 5.2; // spiral into core
+        this.swallowScale = 1 - 0.94 * e;
+        this.speed = Math.max(0, this.speed * (1 - clamp(this.crashT / 0.35, 0, 1)));
+        this.cam += this.speed * dt; this.dist = this.cam;
+        // keep BH spinning during suck-in
+        if (bh && bh.on) bh.rot = (bh.rot || 0) + BH_SPIN * dt;
+        if (this.crashT >= BH_SWALLOW_S && !this.gameOverFired) { this.gameOverFired = true; this._gameOver(); }
+        this._stepObjects(dt);
+        return;
+      }
       this.speed = Math.max(0, this.speed * (1 - clamp(this.crashT / 0.53, 0, 1)));
       this.cam += this.speed * dt; this.dist = this.cam;
       if (this.crashT >= GAMEOVER_AT && !this.gameOverFired) { this.gameOverFired = true; this._gameOver(); }
@@ -881,7 +916,13 @@
         const n = N[i], dx = n.x - hx, dy = n.y - h.y, rr = n.r + h.r;
         if (dx * dx + dy * dy < rr * rr) {
           if (this.shieldGrace > 0) break;
-          if (this.shield) { this.shield = false; this.shieldGrace = SHIELD_GRACE; h.on = false; this._spark(hx, h.y, 1, 14, 260); break; }
+          if (this.shield) {
+            this.shield = false; this.shieldGrace = SHIELD_GRACE;
+            // BH is not destroyable by shield — just burn the shield
+            if (h.kind !== 3) h.on = false;
+            this._spark(hx, h.y, 1, 14, 260); break;
+          }
+          if (h.kind === 3) { this._swallow(h); return; }
           this._crash(i, 0); return;
         }
       }
@@ -907,13 +948,25 @@
   };
   P._crash = function (nodeIdx, edge) {
     if (this.crashed) return;
-    this.crashed = true; this.crashT = 0; this.crashEdge = edge;
+    this.crashed = true; this.crashT = 0; this.crashEdge = edge; this.deathKind = "crash";
     // crash point = the nose (pack frames put it at (230,150))
     const spr = this.sp.rocket, c = Math.cos(this.tilt), s = Math.sin(this.tilt), dx = spr.w / 2 - 4;
     this.crashX = this.px + c * dx; this.crashY = this.py + s * dx;
     this.crashTilt = this.tilt;
     this._sfx("crash");
     if (this.o.onCrash) this.o.onCrash();
+  };
+  // BH core death: suck-in / swallow (no explosion boom). ~BH_SWALLOW_S then result screen.
+  P._swallow = function (bh) {
+    if (this.crashed) return;
+    this.crashed = true; this.crashT = 0; this.crashEdge = 0; this.deathKind = "swallow";
+    this.swallowBh = bh;
+    this.swallowPx = this.px; this.swallowPy = this.py; this.swallowTilt = this.tilt;
+    this.swallowScale = 1;
+    this.crashX = this.px; this.crashY = this.py; this.crashTilt = this.tilt;
+    this._sfx("bh_swallow"); // whoosh — never crashBoom on this path
+    this._audioStop(0.2);
+    if (this.o.onCrash) this.o.onCrash(); // still notify host; scoring uses normal SUCCESS/FAILED
   };
   P._gameOver = function () {
     const distanceKm = Math.floor(this.km());
@@ -1121,6 +1174,15 @@
         }
       }
       this._drawRocket(x, this.px, this.py, this.tilt, 1, (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
+    } else if (this.deathKind === "swallow") {
+      if (this.swallowScale > 0.04) {
+        x.save();
+        x.translate(this.px, this.py);
+        x.rotate(this.tilt);
+        x.scale(this.swallowScale, this.swallowScale);
+        this._drawRocket(x, 0, 0, 0, 1, false);
+        x.restore();
+      }
     } else this._drawCrash(x);
     this._drawDeployFx(x);
     // FX sparks
@@ -1135,7 +1197,12 @@
       x.fillRect(0, 0, VW, WORLD_H);
     }
     // crash dim
-    if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
+    if (this.crashed && this.deathKind === "swallow") {
+      // mild vignette as we fall in — no explosion dim
+      const u = clamp(this.crashT / BH_SWALLOW_S, 0, 1);
+      x.fillStyle = "rgba(10,0,20," + (0.18 + 0.55 * u * u).toFixed(3) + ")";
+      x.fillRect(0, 0, VW, WORLD_H);
+    } else if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
   };
   const COIN_IMG = ["coin_f0.png", "coin_f1.png", "coin_f2.png", "coin_f3.png", "coin_f4.png"];
   P._drawBody = function (x) {
