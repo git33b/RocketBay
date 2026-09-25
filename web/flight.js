@@ -429,7 +429,7 @@
     this._seamRevealed = true;
     this._seamSuppressFlame = false;
     this._seamMorphT0 = this.t;
-    this._seamMorphDur = 0.55; // ease large pad-like plume → flight stub over ~0.55s
+    this._seamMorphDur = 0.65; // ease pad-like plume → flight size over ~0.65s
   };
 
   /* ---- input ---- */
@@ -1327,7 +1327,8 @@
       this._seamMorphU = ease;
       // ~4× length at morph start (pad-like), → 1× at end; survives brief settle→pitch overlap
       if (this.phase === "settle" || (this.phase === "pitch" && ease < 0.999)) {
-        plume *= 1 + (1 - ease) * 3.2;
+        // Strong early, still ~1.8× at mid — avoids cliff once pad FX releases
+        plume *= 1 + (1 - ease) * 3.6;
       }
     } else {
       this._seamMorphU = (this.phase === "settle" && this._seamRevealed) ? 1 : 0;
@@ -1596,33 +1597,32 @@
     const ps = plumeScale || 1;
     const nos = (this.sp && this.sp.nozzles && this.sp.nozzles.length) ? this.sp.nozzles : [{ y: 0, s: 1 }];
     const fl = (Math.floor(this.t * 30) % 3);
-    // v6b5 morph: when plumeScale is boosted (pad hold→flight), draw tapered multi-lobe flame
-    // so warmPx stays continuous instead of snapping to a stub rectangle.
+    // v6b5 morph: pixel-cell plume (not stub rects) while scale is boosted — warmPx continuity
     const morph = this._seamMorphT0 != null
       ? (1 - clamp(this._seamMorphU != null ? this._seamMorphU : 0, 0, 1)) : 0;
-    const organic = morph > 0.05 || ps > 2.4;
+    const organic = morph > 0.04 || ps > 2.2;
     for (let i = 0; i < nos.length; i++) {
-      const n = nos[i], y = n.y, sc = (n.s || 1) * ps;
-      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1) * (organic ? (1.15 + 0.55 * morph) : 1);
+      const n = nos[i], y = n.y, sc = (n.s || 1) * Math.min(ps, organic ? ps : 1);
+      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1) * (organic ? (1.05 + 0.7 * morph) : 1);
       const hw = Math.max(4, 6 * sc), hh = Math.max(3, 5 * sc);
       if (organic) {
-        // Tapered lobes + jittered edges (reads closer to pad cellular plume than a flat stub)
-        const lobes = 5 + (fl % 3);
-        const tipJ = ((Math.floor(this.t * 47 + i * 13) % 5) - 2) * (1.2 + 2 * morph);
-        for (let row = 0; row < lobes; row++) {
-          const u = row / (lobes - 1);
-          const yOff = (u - 0.5) * hw * (1.6 + 1.4 * morph);
-          const rowL = L * (1 - u * u * (0.55 + 0.25 * morph));
-          const rowW = Math.max(2, hw * (1.15 - 0.7 * u) * (1 + 0.35 * morph));
-          const x0 = tailX - rowL + tipJ * u;
-          x.fillStyle = u < 0.25 ? "#FFF8D0" : u < 0.45 ? "#FFDE40" : u < 0.7 ? "#FF8C1C" : "#D6301C";
-          x.fillRect(x0, y + yOff - rowW, rowL, rowW * 2);
+        // Cellular-ish: small squares along tapered length (reads closer to pad FX than big lobes)
+        const cell = Math.max(2, Math.round(2 + 2 * morph));
+        const cols = Math.max(6, Math.round((hw * (1.3 + 1.1 * morph)) / cell));
+        const rows = Math.max(10, Math.round(L / cell));
+        const seed = (Math.floor(this.t * 37) + i * 17) | 0;
+        for (let r = 0; r < rows; r++) {
+          const u = r / (rows - 1);
+          const half = Math.max(1, Math.round(cols * (1 - u * (0.55 + 0.3 * morph)) * 0.5));
+          const xBase = tailX - (r + 1) * cell;
+          for (let c = -half; c <= half; c++) {
+            const h = (seed + r * 31 + c * 17) & 255;
+            if (h < 40 + u * 70) continue; // sparse breakup toward tip
+            const heat = 1 - u * 0.85 - Math.abs(c) / (half + 1) * 0.35;
+            x.fillStyle = heat > 0.75 ? "#FFF8D0" : heat > 0.55 ? "#FFDE40" : heat > 0.32 ? "#FF8C1C" : "#D6301C";
+            x.fillRect(xBase + ((h % 3) - 1), y + c * cell, cell, cell);
+          }
         }
-        // Outer flicker tongues
-        const tongue = L * (0.55 + 0.35 * morph);
-        x.fillStyle = "rgba(214,48,28,0.55)";
-        x.fillRect(tailX - tongue - 4, y - hw * (0.9 + 0.5 * morph), tongue * 0.35, hw * (1.8 + morph));
-        x.fillRect(tailX - tongue * 0.85, y + hw * 0.2, tongue * 0.4, hw * (1.2 + 0.6 * morph));
       } else {
         x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw, L, hw * 2);
         x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);

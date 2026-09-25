@@ -1272,10 +1272,11 @@
         const ho = handoff || {};
         const padRocketH = ho.rocketScreenH || ((ho.stackHcss || 300) * (ho.zoom || 1));
         // v6b5: plume hold/morph 0.5–0.6s + scenery crossfade under rocket (no organic→stub / pad→starfield snap)
-        const PLUME_HOLD_MS = 560;
-        const SCENERY_FADE_MS = 480;
-        const ROCKET_SWAP_MS = 220;   // keep pad rocket until flight shows through fading scenery
-        const PLUME_FADE_MS = 240;    // last beat: fade pad FX while flight morph plume takes over
+        const PLUME_HOLD_MS = 620;   // organic pad FX stays ≥0.4–0.6s across reveal
+        const SCENERY_FADE_MS = 420;  // crossfade after dual-render beat
+        const ROCKET_SWAP_MS = 180;  // pad rocket until flight underlay visible
+        const SCENERY_DELAY_MS = 160; // ≥1 matched frame: pad scenery + flight underlay both live
+        const PLUME_FADE_MS = 220;    // last beat: fade pad FX while flight morph plume takes over
         const finishReveal = () => {
           if (revealed) return;
           revealed = true;
@@ -1285,16 +1286,18 @@
           const tallEl = $("tallSky");
           const skyEl = $("skyExt");
           const sceneryEls = [altEl, tallEl, skyEl].filter(Boolean);
-          // Transparent stage so fading tallSky reveals flight underlay (matched scenery frames)
+          // Transparent stage so flight underlay shows through as tallSky fades (matched frames)
           if (stageEl) stageEl.style.background = "transparent";
-          sceneryEls.forEach((el) => {
-            el.style.transition = "opacity " + SCENERY_FADE_MS + "ms ease-out";
-            el.style.opacity = "0";
-          });
-          // Keep pad rocket + organic FX on top through early fade (no body-less flame gap)
+          // Delay scenery fade so ≥1 frame keeps full pad world over matched flight underlay
+          setTimeout(() => {
+            sceneryEls.forEach((el) => {
+              el.style.transition = "opacity " + SCENERY_FADE_MS + "ms ease-out";
+              el.style.opacity = "0";
+            });
+          }, SCENERY_DELAY_MS);
+          // Keep pad rocket + organic FX on top through early dual-render
           setTimeout(() => {
             clearStackOverlay();
-            // Flight flame morph starts under still-visible pad FX
             try { if (flight && flight.markSeamRevealed) flight.markSeamRevealed(); } catch (_) {}
           }, ROCKET_SWAP_MS);
           setTimeout(() => {
@@ -1338,7 +1341,7 @@
         };
         requestAnimationFrame(() => requestAnimationFrame(tryReveal));
         // Safety: never leave pad forever if match never fires (room for 560ms hold)
-        setTimeout(() => { finishReveal(); }, 1400);
+        setTimeout(() => { finishReveal(); }, 1600);
       } else {
         flCanvas.style.opacity = "1";
         revealFlightChrome();
