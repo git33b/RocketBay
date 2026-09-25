@@ -8,15 +8,19 @@
 (function (global) {
   "use strict";
 
-  const BUILD = "audio1";
+  const BUILD = "gp1s3";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
-  const CLIMB_DUR = 4.2;   // powered climb + camera zoom-out, then mid-air handoff (was 6s + 1.5s exit)
+  const CLIMB_DUR = 2.45;  // v4: hand off ~2.31 into play (was 4.2; kills vanish/snap dead air, ~2s sooner control)
   const EXIT_DUR = 0.0;    // unused — no off-screen exit; flight owns settle after handoff
   const HANDOFF_ZOOM_LAND = 0.92; // landscape: prefer handoff once zoomed out past this (or at CLIMB_DUR)
+  const HANDOFF_ZOOM_PORT = 0.78; // portrait: handoff once zoomed out past this (or at CLIMB_DUR)
   const CLIMB_A = 140;
   const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
   const ZOOM_LAND_FLOOR = 0.58; // landscape zoom floor: adaptive per stack (tall stacks need room for the plume)
+  const ZOOM_PORT_MIN = 0.62; // portrait follow zoom-out toward gameplay scale (composite seam)
+  const SEAM_LB_START = 1.15; // climbT when opaque letterbox begins easing in on pad (v4 box toss)
+  const SEAM_LB_END = 2.40;   // climbT when pad letterbox reaches flight-band height (synced to handoff)
   const PLUME_MIN_CSS = 170;  // landscape follow: keep >=170 px of plume on screen below the nozzle
   const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow
   const NOSE_FRAC_LAND = 0.05; // landscape: nose ~5% below the top edge
@@ -129,6 +133,7 @@
   };
 
   LiftoffEngine.prototype.reset = function () {
+    try { this._hideSeamLetterbox(); } catch (_) {}
     this._zoomS = 1; this._zoomV = 0;
     this._altBlendT0 = null; this._altBlendU = 0;
     this.stop();
@@ -1972,6 +1977,43 @@
     mainG.drawImage(this._altFg, 0, 0);
   };
 
+
+  LiftoffEngine.prototype._updateSeamLetterbox = function (u) {
+    // Opaque axis-aligned bars (#050a18) matching flight BL (840764b). Height grows with u toward
+    // the portrait play-band letterbox (same geometry flight uses: band = WORLD_H scaled to min 760).
+    u = Math.max(0, Math.min(1, u || 0));
+    let el = this._seamLbEl;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "seamLb";
+      el.setAttribute("aria-hidden", "true");
+      el.style.cssText = "position:fixed;inset:0;z-index:28;pointer-events:none;display:none;";
+      const top = document.createElement("div");
+      const bot = document.createElement("div");
+      top.className = "seamLbTop"; bot.className = "seamLbBot";
+      top.style.cssText = bot.style.cssText = "position:absolute;left:0;right:0;background:#050a18;";
+      el.appendChild(top); el.appendChild(bot);
+      document.body.appendChild(el);
+      this._seamLbEl = el; this._seamLbTop = top; this._seamLbBot = bot;
+    }
+    if (u <= 0.001) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    const ch = window.innerHeight || 844, cw = window.innerWidth || 390;
+    // Match flight letterbox: play band height = WORLD_H * s with s = cw/MIN_VIEW_W when portrait.
+    const WORLD_H = 720, MIN_VIEW_W = 760;
+    let s = ch / WORLD_H, viewW = cw / s;
+    if (viewW < MIN_VIEW_W) { s = cw / MIN_VIEW_W; }
+    const bandH = WORLD_H * s;
+    const oy = Math.max(0, (ch - bandH) / 2);
+    const h = oy * u;
+    this._seamLbTop.style.top = "0"; this._seamLbTop.style.height = h + "px";
+    this._seamLbBot.style.bottom = "0"; this._seamLbBot.style.height = h + "px";
+  };
+  LiftoffEngine.prototype._hideSeamLetterbox = function () {
+    if (this._seamLbEl) this._seamLbEl.style.display = "none";
+    this._seamLbA = 0;
+  };
+
   LiftoffEngine.prototype.applyTransforms = function (seat) {
     const lb = this._lb;
     if (!lb) return;
@@ -2016,11 +2058,23 @@
         const tgtL = wrapH * NOSE_FRAC_LAND;
         const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
         if (D > 1 && blendOk) zAllowed = clamp((wrapH + 8 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
+      } else {
+        // Portrait composite seam: zoom OUT toward gameplay scale during climb (was locked at 1.0).
+        // Bound so opaque altitude-sky stays below the bottom edge, same idea as landscape.
+        const clean = this._tallSkyClean || 256;
+        const opaqueLocal = lb.top - (Math.min(clean * 0.5, 128) + 6) * scaleY;
+        const D = opaqueLocal - noseLocal;
+        const tgtP = wrapH * NOSE_FRAC;
+        const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
+        if (D > 1 && blendOk) zAllowed = clamp((wrapH + 8 - tgtP) / D, ZOOM_PORT_MIN, 1);
+        // Ease portrait zoom-out with climb so early climb stays pad-close, late climb hits game scale.
+        const zu = this._pickupT >= 0 ? smooth01(0.15, 1.7, this.climbT - this._pickupT) : 0; // v4: reach game scale by ~2.0s
+        zAllowed = 1 + (zAllowed - 1) * zu;
       }
       {
         // Critically damped spring toward the allowed zoom (~0.6 s settle, C1: velocity starts
         // at 0 -> no jerk). A lagging spring on a falling bound stays above it -> plate never shows.
-        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = 8.4; // ~0.6 s settle
+        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = 12; // v4: ~0.4 s settle so zoom hits game scale by handoff
         let zs = this._zoomS || 1, vz = this._zoomV || 0;
         const acc = W * W * (zAllowed - zs) - 2 * W * vz;
         vz += acc * dtz; zs += vz * dtz;
@@ -2060,6 +2114,12 @@
       world.style.transform =
         "translate3d(" + (this._tx + this._shakeX) + "px," + this._camYi + "px,0)" +
         (this._zoom !== 1 ? " scale(" + this._zoom + ")" : "");
+    }
+    // Composite seam: opaque axis-aligned letterbox eases in during late pad climb (matches flight BL).
+    {
+      const lbU = this.phase === "climb" ? smooth01(SEAM_LB_START, SEAM_LB_END, this.climbT) : (this.phase === "done" ? (this._seamLbA || 0) : 0);
+      this._seamLbA = landscape ? 0 : lbU;
+      this._updateSeamLetterbox(this._seamLbA);
     }
     this.applyRocketLight();
     if (this.ignited || this.released) {
@@ -2162,17 +2222,35 @@
         this.flameIntensity = lerp(this.flameIntensity, 1.35, 0.08);
         if (t < 1.2) this.emitGroundSmoke(seat, Math.max(0.3, 1.0 - t * 0.5));
         this.setAudioLevel(clamp(0.5 - t * 0.06, 0.08, 0.5));
-        // Always hand off at CLIMB_DUR (mid-air). Early ok once landscape zoom has eased out.
+        // Hand off mid-air BEFORE the rocket can leave the top of the frame (v4: no 2.09 vanish).
+        // Early ok once zoomed toward game scale (land or port). Keep rocket on-screen for composite.
         const wrap = this.getWorldEl && this.getWorldEl();
         const landscape = !!(wrap && wrap.clientWidth > wrap.clientHeight);
         const z = this._zoom || 1;
-        const early = landscape && t >= 3.0 && z <= HANDOFF_ZOOM_LAND;
-        if (t >= CLIMB_DUR || early) {
+        const wrapH = (wrap && wrap.clientHeight) || this._wrapH || 844;
+        const noseSy = (typeof global.__liftoffState === "object" && global.__liftoffState && global.__liftoffState.noseScreenY != null)
+          ? global.__liftoffState.noseScreenY
+          : (this._tipLocal0 != null ? z * (this._tipLocal0 - this.rocketY * ((this._lb && this._lb.height / this._lb.nh) || 1)) + (this._camYi || 0) : wrapH * 0.2);
+        const earlyZoom = landscape ? (t >= 2.1 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.0 && z <= HANDOFF_ZOOM_PORT);
+        // If nose is within ~12% of the top, hand off now — never let the rocket vanish off-screen (v4).
+        const nearTop = t >= 1.6 && noseSy < wrapH * 0.12;
+        if (t >= CLIMB_DUR || earlyZoom || nearTop) {
           this.running = false;
           this.finished = true;
           this.phase = "done";
           this.stopAudio(false);
-          const handoff = { seamFromPad: true, zoom: z, climbT: t, camY: this.camY };
+          const handoff = {
+            seamFromPad: true,
+            zoom: z,
+            climbT: t,
+            camY: this.camY,
+            rocketY: this.rocketY,
+            seamLbA: this._seamLbA || 0,
+            landscape: !!landscape,
+            noseScreenY: noseSy,
+            wrapW: (wrap && wrap.clientWidth) || this._wrapW || 390,
+            wrapH: wrapH,
+          };
           try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "done", finished: true, running: false, handoff: handoff }); } catch (_) {}
           if (this.onPerfSample) this.onPerfSample(this.perf.slice());
           this.onComplete(handoff);

@@ -13,7 +13,7 @@
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
-  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta" />
+  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s4" />
   <title>Launch Pad</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
@@ -413,10 +413,10 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=gp1-beta"></script>
-  <script src="audio.js?v=gp1-beta"></script>
-  <script src="liftoff.js?v=gp1-beta"></script>
-  <script src="flight.js?v=gp1-beta"></script>
+  <script src="modular.js?v=gp1-beta-s4"></script>
+  <script src="audio.js?v=gp1-beta-s4"></script>
+  <script src="liftoff.js?v=gp1-beta-s4"></script>
+  <script src="flight.js?v=gp1-beta-s4"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -424,7 +424,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s4";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1087,8 +1087,7 @@
         getPlateEl: () => plate,
         onComplete: (handoff) => {
           state.flightBackdrop = true;
-          clearStackOverlay();
-          // gp1-beta: pad did the only liftoff — flight starts mid-air (settle), never re-climbs
+          // v4: keep pad rocket visible until flight has painted mid-air (no empty-pad snap).
           startFlight(false, { seamFromPad: true, handoff: handoff || null });
         },
         onPerfSample: (samples) => { window.__liftoffPerf = samples; },
@@ -1233,6 +1232,13 @@
       const skipTut = LAB || QS.get("tutorial") === "0" || !!retry;
       const showTut = !LAB && (forceTut || (!skipTut && !seen));
       f.o.onTutorialDone = () => { LS.set("rb_ft_tutorial_seen", "1"); };
+      const fromPadSeam = !!(seamOpts && seamOpts.seamFromPad) && !retry && !LAB;
+      const handoff = (seamOpts && seamOpts.handoff) || null;
+      // v4 composite: keep flight canvas invisible until first mid-air frame, then crossfade over pad.
+      if (fromPadSeam) {
+        flCanvas.style.opacity = "0";
+        flCanvas.style.transition = "none";
+      }
       f.start({
         sprites, tod: TODS[state.todIndex].id, seed, bot: window.__flightBot || buildBotCfg(),
         forceBh: LAB || QS.has("bhforce") || QS.has("bh"), debugHitbox: QS.has("hitbox") || LAB,
@@ -1240,9 +1246,9 @@
         lab: LAB,
         seamFromPad: !!(seamOpts && seamOpts.seamFromPad),
         skipClimb: !!(retry || (seamOpts && (seamOpts.seamFromPad || seamOpts.skipClimb))),
+        handoff: handoff,
       });
       window.__flightInfo = { mode: sprites.mode, packKey: sprites.packKey, chain: f.chain.map((n) => [+n.x.toFixed(1), +n.y.toFixed(1), +n.r.toFixed(1)]), seed };
-      const fromPadSeam = !!(seamOpts && seamOpts.seamFromPad) && !retry && !LAB;
       const revealFlightChrome = () => {
         flDeploy.classList.add("on"); flPause.classList.add("on");
         updateDeployBtn();
@@ -1251,7 +1257,19 @@
       f.o.onHudReveal = () => { if (fromPadSeam) revealFlightChrome(); };
       if (fromPadSeam) {
         flDeploy.classList.remove("on"); flPause.classList.remove("on");
+        // Paint ≥1 mid-air frame, then crossfade pad→flight; only then clear the pad rocket.
+        const reveal = () => {
+          flCanvas.style.transition = "opacity 0.28s linear";
+          flCanvas.style.opacity = "1";
+          setTimeout(() => {
+            clearStackOverlay();
+            try { if (liftoffEngine && liftoffEngine._hideSeamLetterbox) liftoffEngine._hideSeamLetterbox(); } catch (_) {}
+            flCanvas.style.transition = "";
+          }, 300);
+        };
+        requestAnimationFrame(() => requestAnimationFrame(reveal));
       } else {
+        flCanvas.style.opacity = "1";
         revealFlightChrome();
       }
     }

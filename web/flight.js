@@ -1,5 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
- * GP1-BETA: single-pad liftoff→zoom-out→HUD→settle seam (no flight re-climb), tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
+ * GP1-BETA s4: continuous pad-climb→play @~2.31 + box ease-in (no vanish/pad-snap), tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
@@ -21,12 +21,13 @@
   const CLIMB_T = 3.4, PITCH_T = 1.85;       // climb kept for non-seam paths; pitch after settle
   const SEAM_ZOOM0 = 1.82;                   // legacy pad-column framing (unused when seamFromPad)
   const SEAM_ZOOM1 = 1.28;                   // legacy end-of-climb zoom
-  const SETTLE_T = 0.95;                     // brief fall-back after pad handoff before pitch/control
-  const SETTLE_ZOOM0 = 1.20;                 // slightly above gameplay scale at handoff; eases OUT to 1
-  const HUD_ZOOM_ON = 1.05;                  // game HUD appears once camZoom reaches gameplay scale
-  const SETTLE_FALL = 70;                    // design-px downward ease during settle (loss of climb thrust)
-  const LB_EASE_START = 0.08;                // letterbox begins early in settle
-  const LB_EASE_END = 0.88;                  // letterbox fully in by end of settle
+  const ZOOM_PORT_REF = 0.62;               // pad portrait zoom floor → maps handoff.zoom into flight camZoom
+  const SETTLE_T = 0.72;                     // v4: shorter settle — handoff already ~2.31; ~1-2s sooner to control
+  const SETTLE_ZOOM0 = 1.12;                 // nearer gameplay scale (pad already zoomed); eases OUT to 1
+  const HUD_ZOOM_ON = 1.06;                  // game HUD appears once camZoom reaches gameplay scale
+  const SETTLE_FALL = 55;                    // design-px downward ease during settle (loss of climb thrust)
+  const LB_EASE_START = 0.00;                // letterbox continues from pad seamLbA (no snap-in box)
+  const LB_EASE_END = 0.70;                  // letterbox fully in early in settle
   // (removed PITCH_XFADE — no alpha crossfade of two unrelated worlds)
   const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
@@ -324,16 +325,25 @@
       this.bodyY = 720;
       this._log("lab", this.t);
     } else if (cfg && (cfg.seamFromPad || cfg.skipClimb)) {
-      // gp1-beta LOCKED seam: pad already did the only liftoff. Start mid-air at near-gameplay
-      // scale — settle (fall back) + zoom-out finish + HUD, then pitch-over, then control.
-      // Never run phase "climb" (camY 2160→0 would be a second takeoff).
+      // v4 composite seam: pad climb continues into mid-air play. Seed zoom/lb from handoff so
+      // first flight frame matches pad framing — never re-show pad / never camY 2160→0 climb.
       this.phase = "settle"; this.phaseT = 0;
       this.cam = -120; this.camY = 0; this.dist = 0;
-      this.camZoom = SETTLE_ZOOM0; this.lbA = 0; this.climbExit = 1;
+      const ho = (cfg && cfg.handoff) || {};
+      // Map pad zoom (≤1 zoomed-out) → flight camZoom (≥1 zoomed-in). Continuity over snap.
+      let z0 = SETTLE_ZOOM0;
+      if (ho.zoom != null && ho.zoom > 0) {
+        // pad z=1 → ~1.12; pad z=0.62 → ~1.0
+        z0 = clamp(1 + (ho.zoom - ZOOM_PORT_REF) * 0.35, 1.0, 1.18);
+      }
+      const lb0 = (this.letterbox && ho.seamLbA != null) ? clamp(ho.seamLbA, 0, 0.95) : (this.letterbox ? 0.35 : 0);
+      this.camZoom = z0; this._settleZoom0 = z0;
+      this.lbA = lb0; this._settleLb0 = lb0; this.climbExit = 1;
       this.px = this.viewW * 0.5; this.py = 360; this.vy = -90; this.tilt = -Math.PI / 2;
       this.speed = 0; this.hazardsOn = false; this._climbShake = 0;
       this._hudOn = false; this._settlePy0 = 360;
       this.bodyY = 720;
+      this._seamPlume = 0.55; // continue thrust fade — no second engine-start blast
       this._log("settle", this.t);
     }
     if (!this.captureMode) { this.lastTs = 0; this._raf = requestAnimationFrame(this._boundFrame); }
@@ -441,16 +451,17 @@
     if (this.bot) this._botStep();
     const hold = this.bot ? this._botHold : this.holding;
     if (this.phase === "settle") {
-      // Mid-air after pad liftoff: finish zoom-OUT to gameplay scale, HUD on, fall-back, letterbox.
+      // Mid-air composite: finish zoom-OUT + letterbox ease from pad-seeded values; HUD; fall-back.
       const u = clamp(this.phaseT / SETTLE_T, 0, 1);
       const eu = ease(u);
-      this.camZoom = SETTLE_ZOOM0 + (1 - SETTLE_ZOOM0) * eu;
+      const z0 = this._settleZoom0 != null ? this._settleZoom0 : SETTLE_ZOOM0;
+      this.camZoom = z0 + (1 - z0) * eu;
+      const lb0 = this._settleLb0 != null ? this._settleLb0 : 0;
       const lbU = clamp((u - LB_EASE_START) / Math.max(1e-6, LB_EASE_END - LB_EASE_START), 0, 1);
-      this.lbA = this.letterbox ? ease(lbU) : 0;
+      this.lbA = this.letterbox ? (lb0 + (1 - lb0) * ease(lbU)) : 0;
       this.climbExit = 1; this.camY = 0; this._climbShake = 0;
       this.tilt = -Math.PI / 2;
       this.px = this.viewW * 0.5;
-      // Remnant climb then fall back (py increases = loss of altitude).
       const py0 = this._settlePy0 != null ? this._settlePy0 : 360;
       this.py = py0 + SETTLE_FALL * eu;
       this.vy = (1 - eu) * -90 + eu * 40;
@@ -464,6 +475,7 @@
         this.camZoom = 1; this._pitchZoom0 = 1; this._climbShake = 0;
         this._pitchFromPy = py0 + SETTLE_FALL;
         this.py = this._pitchFromPy; this.vy = 0;
+        this.lbA = this.letterbox ? 1 : 0;
         this._hudOn = true; this._notifyHud();
       }
       return;
@@ -1265,7 +1277,7 @@
     // Single rocket in seam camera space — scale tracks camZoom continuously (still inside play clip)
     const thrusting = this.phase === "climb" || this.phase === "pitch" || (this.phase === "settle" && this.phaseT < SETTLE_T * 0.55);
     const plume = this.phase === "climb" ? CLIMB_PLUME
-      : this.phase === "settle" ? (CLIMB_PLUME * (1 - 0.55 * clamp(this.phaseT / SETTLE_T, 0, 1)))
+      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.55) * CLIMB_PLUME * (1 - 0.7 * clamp(this.phaseT / SETTLE_T, 0, 1)))
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
     const sh = this._climbShake || 0;
     const rx = this.px + (sh ? Math.sin(this.t * 47) * sh : 0);
