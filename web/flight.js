@@ -1,4 +1,7 @@
-/* RocketBay FLIGHT MODE v1 / flight2d live / bh1g-lab (blackhole-v1)
+/* RocketBay FLIGHT MODE v1 / flight2d live / bh1g-lab (blackhole-v1) / keep-trial
+ * keep-trial: C2 longer dual-layer cruise exhaust + ~10° nose-up while thrusting;
+ * C3 BH void/swirl/pull/suck-in draw (bh1g physics knobs unchanged).
+ * Pad→flight join/handoff stays flight2d (no overnight continuous-climb rewrite).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
  * swallow death (no crash boom on BH), L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5;
@@ -19,7 +22,8 @@
   const CLIMB_T = 2.4, PITCH_T = 1.0;        // climb + pitch-over (pack)
   const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
-  const TILT_MAX = 15 * Math.PI / 180, TILT_RATE = 9;    // tilt follows vy (1/s response)
+  const TILT_MAX = 10 * Math.PI / 180, TILT_RATE = 7;    // keep-trial C2: ~10° nose-up while thrusting only
+  const FLIGHT_PLUME = 4.15;                 // keep-trial C2: longer cruise exhaust (~1.2–1.5× body dual-layer)
   const FUEL_DRAIN = 1 / 11;                 // tank fraction per second of thrust held (placeholder)
   const FUEL_REFILL = 0.5;                   // fuel pickup
   const KM_PER_PX = 1500 / 15360;            // 1 zone (1500 km) == one zone-art segment (3840 art px at 0.25x)
@@ -446,7 +450,7 @@
       this.vy = clamp(this.vy, -VY_MAX, VY_MAX);
       this.py += this.vy * dt;
       if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
-      const tt = (this.vy / VY_MAX) * TILT_MAX;
+      const tt = thrusting ? -TILT_MAX * (0.88 + 0.12 * clamp(-this.vy / VY_MAX, 0, 1)) : 0; // c2: ~9–10° while thrusting
       this.tilt += (tt - this.tilt) * Math.min(1, TILT_RATE * dt);
       // keep in band
       if (this.py < 40) { this.py = 40; this.vy = Math.max(0, this.vy); }
@@ -501,7 +505,9 @@
     this.vy = clamp(this.vy, -VY_MAX * 1.15, VY_MAX * 1.15);
     this.py += this.vy * dt;
     if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * (light ? LIGHT_FUEL : 1) * dt);
-    const tt = (this.vy / VY_MAX) * TILT_MAX, k = TILT_RATE * (light ? LIGHT_TILT : 1);
+    // keep-trial C2: flat ~0° while coasting; ~10° nose-up only while thrusting
+    const tt = thrusting ? -TILT_MAX * (0.88 + 0.12 * clamp(-this.vy / VY_MAX, 0, 1)) : 0;
+    const k = TILT_RATE * (light ? LIGHT_TILT : 1) * (thrusting ? 1 : 1.35);
     this.tilt += (tt - this.tilt) * Math.min(1, k * dt);
     if (this.shieldGrace > 0) this.shieldGrace -= dt;
     if (this.magnetT > 0) this.magnetT -= dt;
@@ -1218,6 +1224,11 @@
           x.beginPath(); x.arc(sx, h.y, h.pullR || BH_PULL_R, 0, Math.PI * 2); x.stroke(); // pullR ref ring (accel is global)
           x.restore();
         }
+        // keep-trial C3: world-aligned inbound pull dashes when not already in soft-R VFX
+        if (h.kind === 3 && !this.crashed && !this._bhInPull) {
+          const reach = Math.max(h.dw * 0.95, h.r * 3.2);
+          this._drawBhPullStreaks(x, sx, h.y, h.r, reach, this.px, this.py, 0.45);
+        }
       }
     }
     for (let i = 0; i < this.pick.length; i++) {
@@ -1240,7 +1251,12 @@
           x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
         }
       }
-      this._drawRocket(x, this.px, this.py, this.tilt, 1, (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
+      {
+        const thrusting = (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0);
+        const cruisePh = this.phase === "flight" || this.phase === "practice";
+        const plumeSc = cruisePh ? FLIGHT_PLUME : 1;
+        this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, plumeSc);
+      }
     } else if (this.deathKind === "swallow") {
       // Spinning shrink into core — rocket only, no crash frames / debris / boom art
       if (this.swallowScale > 0.04) {
@@ -1259,15 +1275,17 @@
       x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
       x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
     }
-    // cheap pull vignette (skip-heavy; soft-R scoped visual only — pull itself is global)
-    if (this._bhInPull && !this.crashed) {
-      x.fillStyle = "rgba(40,10,60,0.12)";
-      x.fillRect(0, 0, VW, WORLD_H);
-    }
+    // keep-trial C3: BH purple/blue pull swirl + dust streaks (soft-R visual; pull itself is global bh1g)
+    if (this._bhInPull && !this.crashed) this._drawBhPullVfx(x, VW);
     // crash dim
     if (this.crashed && this.deathKind === "swallow") {
-      // mild vignette as we fall in — no explosion dim
+      // mild vignette as we fall in — no explosion dim; suck-in streaks into core
       const u = clamp(this.crashT / BH_SWALLOW_S, 0, 1);
+      const bh = this.swallowBh;
+      if (bh && bh.on) {
+        const hx = bh.x - this.cam * (bh.par || 1), hy = bh.y;
+        this._drawBhPullStreaks(x, hx, hy, bh.r, Math.max(bh.dw, 120) * (1.1 - 0.5 * u), this.px, this.py, 0.7 + 0.3 * u);
+      }
       x.fillStyle = "rgba(10,0,20," + (0.18 + 0.55 * u * u).toFixed(3) + ")";
       x.fillRect(0, 0, VW, WORLD_H);
     } else if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
@@ -1294,7 +1312,7 @@
     const w = Math.max(1280, VW), ox = (VW - w) / 2;
     x.drawImage(im, 0, 0, im.width, im.height, Math.round(ox), Math.round(y), w, im.height);
   };
-  P._drawRocket = function (x, cx, cy, ang, a, flame) {
+  P._drawRocket = function (x, cx, cy, ang, a, flame, plumeScale) {
     const sp = this.sp, rk = sp.rocket;
     let im = rk.canvas, w = rk.w, h = rk.h, ay = rk.axisY, fx = 0;
     let frame = -1;
@@ -1303,7 +1321,7 @@
       if (frame >= 8) { frame = -1; if (sp.postImg) { const pi = this._get(sp.postImg); if (pi) { im = pi; fx = 1; } } else if (sp.post) { im = sp.post.canvas; } }
     }
     x.save(); x.translate(cx, cy); x.rotate(ang);
-    if (flame) this._drawFlame(x, -w / 2, 0);
+    if (flame) this._drawFlame(x, -w / 2, plumeScale || 1);
     if (frame >= 0 && sp.frames) { // pack frames: stack tail at x=0, stack top at origin y
       const f = this._get(sp.frames[frame]);
       if (f) x.drawImage(f, -w / 2, -ay - sp.origin[1]);
@@ -1324,12 +1342,122 @@
     x.restore();
   };
   P._payloadDrawable = function () { const sp = this.sp; if (sp.payload) return sp.payload.canvas; return sp.payloadImg ? this._get(sp.payloadImg) : null; };
-  P._drawFlame = function (x, tailX, y) {
+  // keep-trial C2: dual-layer cruise exhaust (cool smoke trail + fire core). No overnight seam morph.
+  P._drawFlame = function (x, tailX, plumeScale) {
+    const ps = plumeScale || 1;
+    const nos = (this.sp && this.sp.nozzles && this.sp.nozzles.length) ? this.sp.nozzles : [{ y: 0, s: 1 }];
     const fl = (Math.floor(this.t * 30) % 3);
-    const L = 26 + fl * 5;
-    x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - 6, L, 12);
-    x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - 5, L * 0.72, 10);
-    x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - 3, L * 0.42, 6);
+    for (let i = 0; i < nos.length; i++) {
+      const n = nos[i], y = n.y, sc = (n.s || 1) * ps;
+      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1);
+      const hw0 = Math.max(4, 6 * sc), hh = Math.max(3, 5 * sc);
+      const cruise = this.phase === "flight" || this.phase === "practice";
+      if (cruise) {
+        const smokeL = L * 2.15;
+        const smHw = Math.max(3, hw0 * 0.95);
+        for (let b = 0; b < 5; b++) {
+          const u = b / 4;
+          const x1 = tailX - smokeL * (u + 0.22);
+          const x0 = tailX - smokeL * u * 0.85;
+          const w = Math.max(2, x0 - x1);
+          const half = smHw * (1.05 - 0.7 * u);
+          const j = ((fl + b + i) % 3) - 1;
+          x.fillStyle = u < 0.35 ? "#4A3834" : u < 0.7 ? "#2A2428" : "#1C181C";
+          x.fillRect(x1, y - half + j, w, half * 2);
+        }
+        x.fillStyle = "#141018";
+        x.fillRect(tailX - smokeL - 5, y - 1 + (fl % 2), 7, 2);
+        x.fillRect(tailX - smokeL + 6, y + smHw * 0.3, 8, 2);
+        x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0 * 0.95, L, hw0 * 1.9);
+        x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.7, y - hh * 0.9, L * 0.7, hh * 1.8);
+        x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.4, y - Math.max(2, 2.8 * sc), L * 0.4, Math.max(4, 5.6 * sc));
+        x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.18, y - 1.8 * sc, L * 0.18, 3.6 * sc);
+      } else {
+        x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0, L, hw0 * 2);
+        x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
+        x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
+        if (ps > 1.6) {
+          x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
+        }
+      }
+    }
+  };
+
+  // keep-trial C3: inbound purple pull-dust streaks (telegraph) — cosmetic; gravity stays bh1g
+  P._drawBhPullStreaks = function (x, hx, hy, coreR, reach, aimX, aimY, strength) {
+    const dx = aimX - hx, dy = aimY - hy;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+    const ang0 = Math.atan2(uy, ux);
+    const n = 7;
+    const tPulse = this.t * 2.4;
+    x.save();
+    for (let i = 0; i < n; i++) {
+      const fan = (i - (n - 1) / 2) * 0.11;
+      const a = ang0 + fan;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const r0 = Math.max(coreR * 1.35, reach * 0.22);
+      const r1 = reach * (0.72 + 0.08 * Math.sin(tPulse + i));
+      const dashes = 5;
+      for (let d = 0; d < dashes; d++) {
+        const u0 = d / dashes, u1 = (d + 0.55) / dashes;
+        const ra = r1 + (r0 - r1) * u0;
+        const rb = r1 + (r0 - r1) * u1;
+        const alpha = (0.22 + 0.55 * strength) * (1 - u0 * 0.65) * (1 - Math.abs(fan) * 1.2);
+        if (alpha < 0.04) continue;
+        x.strokeStyle = i % 2 === 0
+          ? ("rgba(180,120,255," + alpha.toFixed(3) + ")")
+          : ("rgba(120,160,255," + (alpha * 0.85).toFixed(3) + ")");
+        x.lineWidth = 1.5 + (1 - u0) * 1.2 * strength;
+        x.beginPath();
+        x.moveTo(hx + ca * ra, hy + sa * ra);
+        x.lineTo(hx + ca * rb, hy + sa * rb);
+        x.stroke();
+      }
+      const rm = (r0 + r1) * 0.5;
+      const mx = hx + ca * rm + Math.sin(tPulse * 1.7 + i) * 3;
+      const my = hy + sa * rm + Math.cos(tPulse * 1.3 + i) * 2;
+      x.fillStyle = "rgba(200,160,255," + (0.35 * strength).toFixed(3) + ")";
+      x.fillRect(Math.round(mx) - 1, Math.round(my) - 1, 2, 2);
+    }
+    x.restore();
+  };
+  P._drawBhPullVfx = function (x, VW) {
+    // Localized swirl (soft-R). Dark vignette + purple/blue — never dirt wash.
+    let best = null, bestD = 1e9;
+    const cam = this.cam;
+    for (let i = 0; i < this.haz.length; i++) {
+      const h = this.haz[i]; if (!h.on || h.kind !== 3) continue;
+      const hx = h.x - cam * h.par, dx = hx - this.px, dy = h.y - this.py;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestD) { bestD = d; best = h; }
+    }
+    x.fillStyle = "rgba(18, 6, 42, 0.16)";
+    x.fillRect(0, 0, VW, WORLD_H);
+    if (!best) return;
+    const hx = best.x - cam * best.par, hy = best.y;
+    const pr = best.pullR || BH_PULL_R;
+    const g = x.createRadialGradient(hx, hy, best.r * 0.6, hx, hy, pr);
+    g.addColorStop(0, "rgba(40, 0, 70, 0.0)");
+    g.addColorStop(0.35, "rgba(90, 40, 180, 0.14)");
+    g.addColorStop(0.7, "rgba(40, 80, 200, 0.18)");
+    g.addColorStop(1, "rgba(10, 20, 50, 0.0)");
+    x.fillStyle = g;
+    x.beginPath(); x.arc(hx, hy, pr, 0, Math.PI * 2); x.fill();
+    const str = Math.max(0.35, 1 - bestD / (pr + 80));
+    this._drawBhPullStreaks(x, hx, hy, best.r, Math.min(pr * 0.85, bestD + 40), this.px, this.py, str);
+    x.save();
+    x.translate(hx, hy);
+    x.rotate((best.rot || 0) * 1.6 + this.t * 1.8);
+    x.strokeStyle = "rgba(160, 120, 255, 0.45)"; x.lineWidth = 2.5;
+    x.beginPath(); x.arc(0, 0, pr * 0.55, 0.15, 1.4); x.stroke();
+    x.strokeStyle = "rgba(80, 160, 255, 0.4)"; x.lineWidth = 2;
+    x.beginPath(); x.arc(0, 0, pr * 0.78, 2.0, 3.4); x.stroke();
+    x.strokeStyle = "rgba(200, 160, 255, 0.28)"; x.lineWidth = 1.5;
+    x.beginPath(); x.arc(0, 0, pr * 0.92, 4.0, 5.5); x.stroke();
+    x.strokeStyle = "rgba(220, 180, 255, 0.7)"; x.lineWidth = 2;
+    x.beginPath(); x.arc(0, 0, Math.max(18, best.r * 1.15), 0, Math.PI * 2); x.stroke();
+    x.restore();
   };
   P._drawDeployFx = function (x) {
     if (!this.deployed || this.deployT < 0) return;
@@ -1531,6 +1659,7 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
+      TILT_MAX, TILT_RATE, FLIGHT_PLUME,
       // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
       BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
