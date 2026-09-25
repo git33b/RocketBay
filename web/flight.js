@@ -1,11 +1,10 @@
-/* RocketBay FLIGHT MODE v1 / flight2d live / bh1g-lab (blackhole-v1) / keep-trial
- * keep-trial: C2 longer dual-layer cruise exhaust + ~10° nose-up while thrusting;
- * C3 BH void/swirl/pull/suck-in draw (bh1g physics knobs unchanged).
- * Pad→flight join/handoff stays flight2d (no overnight continuous-climb rewrite).
+/* RocketBay FLIGHT MODE v1 / flight2d live / bh1g-lab (blackhole-v1) / keep-bh-speed
+ * keep-trial base + KEEP-BH-SPEED: BH front deadband, early 0–5000 km budget N∈[3,5],
+ * denser post-5000, speed pickup (1.25× timescale × SPEED_BUFF_S). KEEP attrs/thrust/C3 BH art.
+ * Pad→flight join/handoff stays flight2d (no overnight seam / ZOOM_PORT / seamFromPad).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
- * swallow death (no crash boom on BH), L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5;
- * lab-only ~3 early burst.
+ * swallow death (no crash boom on BH); depth scales draw+pullR ~1→1.25→1.5; lab-only ~3 early burst.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -35,6 +34,7 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
+  const SPEED_BUFF_S = 8, SPEED_BUFF_MULT = 1.25; // keep-bh-speed: 1.25× timescale, refresh duration (no stack)
   // BLACKHOLE v1 / bh1g (named tunables — CoE playtest; lab-only global pull + strong-G)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
   // Base size as-is at early depth; draw+pullR grow with depth (pullR = debug/vignette/spawn only).
@@ -56,7 +56,9 @@
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
   const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
   const BH_MIN_KM = 0;                   // bh1e: L1 allowed (was 95); no early wipe
-  const BH_GAP0 = 26, BH_GAP1 = 12;      // full-path seconds between BH (L1 → deep); nextBhAt ≈ max(8, gap)
+  const BH_FRONT_DEAD = 200;             // keep-bh-speed: |spawnY − py| ≥ 200 (vertical escape band)
+  const BH_EARLY_KM = 5000;              // keep-bh-speed: budget N∈[3,5] paced across 0–5000 km
+  const BH_GAP0 = 26, BH_GAP1 = 12;      // legacy deep gaps (post-5000 uses ~2× early rate)
   // Depth visual/pull scale (same art): early ~1.0 → mid ~1.25 → deep ~1.5
   const BH_SCALE0 = 1.0, BH_SCALE1 = 1.25, BH_SCALE2 = 1.5;
   const BH_LAB_BURST = 3;                // lab-only: ~3 early sequential BHs (one-at-a-time)
@@ -70,11 +72,11 @@
   }
   const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
   const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
-  const TIERS = [ // pack tiers (speed band -> density)
-    { max: 420, spacing: 640, gap: 300, extra: 1.6, shift: 160, arcs: 1.2, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02 },
-    { max: 490, spacing: 640, gap: 265, extra: 1.8, shift: 180, arcs: 1.1, fuelN: 5, shield: 0.07, magnet: 0.07, gem: 0.03 },
-    { max: 560, spacing: 590, gap: 235, extra: 2.2, shift: 190, arcs: 1.0, fuelN: 4, shield: 0.08, magnet: 0.07, gem: 0.04 },
-    { max: 1e9, spacing: 560, gap: 210, extra: 2.6, shift: 200, arcs: 0.9, fuelN: 4, shield: 0.10, magnet: 0.06, gem: 0.05 },
+  const TIERS = [ // pack tiers (speed band -> density); speed ~shield weight (keep-bh-speed)
+    { max: 420, spacing: 640, gap: 300, extra: 1.6, shift: 160, arcs: 1.2, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02, speed: 0.05 },
+    { max: 490, spacing: 640, gap: 265, extra: 1.8, shift: 180, arcs: 1.1, fuelN: 5, shield: 0.07, magnet: 0.07, gem: 0.03, speed: 0.06 },
+    { max: 560, spacing: 590, gap: 235, extra: 2.2, shift: 190, arcs: 1.0, fuelN: 4, shield: 0.08, magnet: 0.07, gem: 0.04, speed: 0.07 },
+    { max: 1e9, spacing: 560, gap: 210, extra: 2.6, shift: 200, arcs: 0.9, fuelN: 4, shield: 0.10, magnet: 0.06, gem: 0.05, speed: 0.08 },
   ];
   // flight-pack-v1.3.1 spacing + escape-gap (Ateeb): spread default, cluster occasional, gap always
   const CLUSTER_P = 0.20;                 // ~15-25% of walls are dense packs
@@ -109,6 +111,7 @@
     coin_f0: [127, 133, 63.6, 66.3, 65.6], coin_f1: [112, 133, 55.7, 66.4, 65.6], coin_f2: [49, 133, 23.9, 66.3, 65.6],
     coin_f3: [103, 133, 50.8, 66.3, 65.6], coin_f4: [128, 133, 63.5, 66.4, 65.6],
     fuel: [102, 148, 50.7, 77.2, 66.1], shield: [131, 143, 65.1, 65.5, 67.6], magnet: [125, 128, 62.0, 62.0, 60.9], gem: [171, 132, 85.3, 52.5, 66.5],
+    speed: [128, 128, 64.0, 64.0, 52.0], // keep-bh-speed placeholder (architect: shield-family lightning/chevron)
     asteroid_0: [139, 121, 69.9, 62.7, 50.0], asteroid_1: [156, 137, 78.3, 70.8, 57.2], asteroid_2: [136, 125, 68.2, 63.5, 50.6],
     asteroid_3: [160, 136, 80.6, 71.1, 56.7], asteroid_4: [129, 112, 64.3, 58.7, 45.7],
     planet_gas: [162, 162, 80.6, 80.6, 65.0], planet_moon: [155, 155, 76.8, 77.4, 61.8], planet_ringed: [233, 147, 116.7, 72.8, 58.8],
@@ -221,7 +224,7 @@
   // Everything the first seconds need (climb bridge for this TOD, orbit tile, earth limb, hazards, HUD)
   P.preload = function (tod) {
     const core = ["climb-bridge-" + tod + ".png", "bg-orbit-edge-tile.png", "earth-limb.png", "parallax/far-stars-tile.png",
-      "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png",
+      "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "speed.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png",
       "hazard-meteor.png", "hazard-blackhole.png", "tutorial/FT-first-flight-overlay.png"];
     for (let i = 0; i < 5; i++) core.push("coin_f" + i + ".png", "asteroid_" + i + ".png");
     this._padSrc = this.o.padPlate ? this.o.padPlate(tod) : null;
@@ -273,7 +276,7 @@
     this.cam = -1; this.camY = 2160; this.speed = 0; this.dist = 0; // dist = world px since km 0
     this.px = 640; this.py = 430; this.vy = 0; this.tilt = -Math.PI / 2; this.holding = false; this._botHold = false;
     this.fuel = 1; this.coins = 0; this.deployed = false; this.deployKm = 0; this.bonus = 0; this.deployT = -1;
-    this.crashed = false; this.crashT = 0; this.deathKind = null; this.swallowScale = 1; this.swallowBh = null; this.shield = false; this.shieldGrace = 0; this.magnetT = 0;
+    this.crashed = false; this.crashT = 0; this.deathKind = null; this.swallowScale = 1; this.swallowBh = null; this.shield = false; this.shieldGrace = 0; this.magnetT = 0; this.speedBuffT = 0;
     this.nextGateX = 900; this.gateN = 0; this.lastGapC = 360; this.nextExtraX = 1200;
     this.planetBlock = { top0: 0, top1: -1, topY: 0, bot0: 0, bot1: -1, botY: 720 };
     this.zoneIdx = 0; this.bannerT = -10; this.bannerZone = 0; this.comet = { on: false, x: 0, y: 0 }; this.cometZone = -1;
@@ -282,6 +285,7 @@
     this.practiceT = 0; this.hazardsOn = !this.wantTutorial;
     this.nextMeteorAt = 0; this.meteorN = 0;
     this.nextBhAt = 1e9; this.bhN = 0; this._bhInPull = false;
+    this.bhEarlyBudget = 3 + Math.floor(this._rand() * 3); // keep-bh-speed: N∈[3,5] once per run for km 0–5000
     this.lastGateSig = ""; this.gapJitter = 0;
     this.nextDecorX = 0; this.popT = -10; this.gameOverFired = false; this.result = null; this.events.length = 0;
     this.bodyY = 720; this.accum = 0; this.lastTs = 0; this.fps = []; this._flash = 0;
@@ -495,6 +499,13 @@
       return;
     }
     const light = this.deployed;
+    // keep-bh-speed: countdown buffs on wall dt, then scale flight timescale (scroll+physics)
+    if (this.shieldGrace > 0) this.shieldGrace -= dt;
+    if (this.magnetT > 0) this.magnetT -= dt;
+    if (this.speedBuffT > 0) {
+      this.speedBuffT = Math.max(0, this.speedBuffT - dt);
+      dt *= SPEED_BUFF_MULT; // 1.25×; refresh duration only (no stack multiply)
+    }
     this.speed = Math.min(SPEED_CAP, SPEED0 + SPEED_RAMP * this.phaseT);
     this.cam += this.speed * dt; this.dist = this.cam;
     const thrusting = hold && this.fuel > 0;
@@ -509,8 +520,6 @@
     const tt = thrusting ? -TILT_MAX * (0.88 + 0.12 * clamp(-this.vy / VY_MAX, 0, 1)) : 0;
     const k = TILT_RATE * (light ? LIGHT_TILT : 1) * (thrusting ? 1 : 1.35);
     this.tilt += (tt - this.tilt) * Math.min(1, k * dt);
-    if (this.shieldGrace > 0) this.shieldGrace -= dt;
-    if (this.magnetT > 0) this.magnetT -= dt;
     // earth limb drops out over 0-600 km; zone edge bodies slide per zone
     this._spawn();
     this._stepObjects(dt);
@@ -582,9 +591,9 @@
     }
   };
 
-  // BLACKHOLE v1 / bh1g: rare well ahead of camera. Escape = skirt above/below.
+  // BLACKHOLE v1 / bh1g + keep-bh-speed: deadband Y, early budget N∈[3,5] paced 0–5000 km,
+  // post-5000 denser (~2× early rate). One-at-a-time. Lab/forceBh on-screen but same deadband.
   // Core-only death; arms/ring spin. Global BH_FALL pull while BH alive (BH_GLOBAL_PULL; pullR visual/spawn).
-  // Full path: random gaps, one-at-a-time, L1 gets 1–2. Lab: ~3 early sequential only.
   P._spawnBlackholes = function () {
     if (this.t < this.nextBhAt) return;
     const R = () => this._rand();
@@ -592,20 +601,50 @@
     const force = !!(this.cfg && this.cfg.forceBh);
     const lab = !!(this.cfg && this.cfg.lab);
     const labBurst = lab && this.bhN < BH_LAB_BURST;
-    // bh1e: L1 allowed (BH_MIN_KM=0; no phaseT wipe). Keep one-at-a-time.
+    const km = this.km();
+    const early = km < BH_EARLY_KM;
     // only one active BH at a time (keeps escape readable; no overlapping wells)
     for (let i = 0; i < this.haz.length; i++) {
       if (this.haz[i].on && this.haz[i].kind === 3) {
-        // lab burst: poll soon so next fires right after current leaves; else defer
-        this.nextBhAt = labBurst ? Math.min(this.nextBhAt, this.t + 0.35) : (this.t + 6 + R() * 6);
+        this.nextBhAt = labBurst ? Math.min(this.nextBhAt, this.t + 0.35) : (this.t + 2 + R() * 2);
         return;
       }
     }
-    // Deeper = more often (gap 26→12). Random jitter keeps gaps unpredictable (not on a beat).
-    const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
-    this.nextBhAt = this.t + Math.max(8, gap);
-    // First full-path BH always lands when due (guarantee L1 ≥1); later: mild random skip, less deep.
-    if (!force && !lab && this.bhN > 0 && R() > (0.55 + 0.35 * u)) return;
+    // Early band: never exceed budget N before 5000 km (normal path)
+    if (!force && !lab && early && this.bhN >= this.bhEarlyBudget) {
+      this.nextBhAt = this.t + 1.2; // poll until past BH_EARLY_KM
+      return;
+    }
+
+    // Schedule next gap (pace early across remaining km; post-5000 ~2× early rate)
+    if (labBurst) {
+      /* set after spawn */
+    } else if (!force && !lab && early) {
+      const remainN = Math.max(1, this.bhEarlyBudget - this.bhN);
+      const remainKm = Math.max(350, BH_EARLY_KM - km);
+      const tLeft = (remainKm / KM_PER_PX) / Math.max(220, this.speed);
+      const gap = (tLeft / remainN) * (0.65 + R() * 0.4);
+      this.nextBhAt = this.t + Math.max(8, gap);
+    } else if (!force && !lab) {
+      // post-5000: early ~N/140s ≈ 1/35s → 2× ≈ ~17s gaps (tighter deep)
+      const gap = (17 - 5 * u) * (0.75 + R() * 0.5);
+      this.nextBhAt = this.t + Math.max(6, gap);
+    } else {
+      const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
+      this.nextBhAt = this.t + Math.max(8, gap);
+    }
+
+    // Skip: early almost never (must hit budget); post less skip than legacy
+    if (!force && !lab) {
+      if (early) {
+        const remainN = this.bhEarlyBudget - this.bhN;
+        const remainKm = BH_EARLY_KM - km;
+        const urgent = remainN > 0 && remainKm < remainN * 1100;
+        if (!urgent && this.bhN > 0 && R() > 0.93) return;
+      } else if (R() > (0.82 + 0.15 * u)) {
+        return;
+      }
+    }
 
     const dScale = bhDepthScale(u); // ~1.0 early → 1.25 mid → 1.5 deep
     const pullR = BH_PULL_R * dScale;
@@ -615,14 +654,12 @@
     // lab/forceBh place ON SCREEN (in front of rocket). Normal rare BH stays ahead of view.
     let x;
     if (force || lab) {
-      // Fixed-ish fraction of viewW so BH is visible without scrolling (~viewW*0.55–0.75)
       const frac = this.bhN === 0 ? 0.62 : (0.55 + R() * 0.2);
       x = this.cam + this.viewW * frac;
     } else {
       x = this.cam + this.viewW + 140 + R() * 120;
     }
 
-    // Pick Y with skirt escape; for force/lab RETRY immediately — never defer past window
     function clogAt(self, xx, yy, pr) {
       let clogTop = 0, clogBot = 0;
       for (let i = 0; i < self.haz.length; i++) {
@@ -632,24 +669,50 @@
       }
       return { clogTop, clogBot };
     }
-    let y = yMin + R() * (yMax - yMin);
-    if (R() < 0.6) y = R() < 0.5 ? (yMin + R() * 160) : (yMax - R() * 160);
+    // keep-bh-speed: |spawnY − py| ≥ BH_FRONT_DEAD; prefer upper/lower thirds on retry
+    function pickDeadbandY(self) {
+      const py = self.py;
+      let y = yMin + R() * (yMax - yMin);
+      for (let attempt = 0; attempt < 14; attempt++) {
+        if (attempt === 0 && R() < 0.55) {
+          y = R() < 0.5 ? (yMin + R() * ((yMax - yMin) / 3)) : (yMax - R() * ((yMax - yMin) / 3));
+        } else if (attempt > 0) {
+          y = attempt % 2 === 0
+            ? (yMin + R() * ((yMax - yMin) / 3))
+            : (yMax - R() * ((yMax - yMin) / 3));
+        } else {
+          y = yMin + R() * (yMax - yMin);
+        }
+        y = clamp(y, yMin, yMax);
+        if (Math.abs(y - py) >= BH_FRONT_DEAD) return y;
+      }
+      // hard push to far third from player
+      if (py < WORLD_H * 0.5) return clamp(yMax - 50 - R() * 70, yMin, yMax);
+      return clamp(yMin + 50 + R() * 70, yMin, yMax);
+    }
+    let y = pickDeadbandY(this);
     let { clogTop, clogBot } = clogAt(this, x, y, pullR);
-    if (clogTop >= 2 && clogBot < 2) y = Math.max(y, WORLD_H * 0.58);
-    else if (clogBot >= 2 && clogTop < 2) y = Math.min(y, WORLD_H * 0.42);
+    if (clogTop >= 2 && clogBot < 2) {
+      y = Math.max(y, WORLD_H * 0.58);
+      if (Math.abs(y - this.py) < BH_FRONT_DEAD) y = pickDeadbandY(this);
+    } else if (clogBot >= 2 && clogTop < 2) {
+      y = Math.min(y, WORLD_H * 0.42);
+      if (Math.abs(y - this.py) < BH_FRONT_DEAD) y = pickDeadbandY(this);
+    }
     if (force || lab) {
-      // up to 6 Y retries; if still clogged both skirts, force upper or lower skirt spawn
       for (let attempt = 0; attempt < 6; attempt++) {
         ({ clogTop, clogBot } = clogAt(this, x, y, pullR));
-        if (clogTop < 2 || clogBot < 2) break;
-        y = attempt % 2 === 0 ? (yMin + R() * 140) : (yMax - R() * 140);
+        if ((clogTop < 2 || clogBot < 2) && Math.abs(y - this.py) >= BH_FRONT_DEAD) break;
+        y = pickDeadbandY(this);
       }
       ({ clogTop, clogBot } = clogAt(this, x, y, pullR));
       if (clogTop >= 2 && clogBot >= 2) {
-        // hard skirt: place in less-clogged third so ONE escape path stays open
         y = clogTop <= clogBot ? (yMin + 40 + R() * 80) : (yMax - 40 - R() * 80);
+        if (Math.abs(y - this.py) < BH_FRONT_DEAD) y = pickDeadbandY(this);
       }
     }
+    // final clamp: never ship a front-line BH
+    if (Math.abs(y - this.py) < BH_FRONT_DEAD) y = pickDeadbandY(this);
 
     const h = this._hazard("hazard-blackhole", x, y, drawW, 1, 0, 0, this._zoneAtX(x));
     if (h) {
@@ -659,15 +722,16 @@
       h.dScale = dScale;
       this.bhN++;
       this._log("bh_spawn", this.t);
-      // lab burst: schedule next soon (~3–6s); one-at-a-time gate above waits until current leaves
       if (lab && this.bhN < BH_LAB_BURST) {
         this.nextBhAt = this.t + BH_LAB_BURST_GAP0 + R() * (BH_LAB_BURST_GAP1 - BH_LAB_BURST_GAP0);
+      } else if (!force && !lab && early && this.bhN >= this.bhEarlyBudget) {
+        this.nextBhAt = this.t + 1.5; // wait out early band
       }
     } else if (force || lab) {
-      // Pool exhausted — retry very soon rather than wait full gap (must show BH by ~8s)
       this.nextBhAt = this.t + 0.25;
     }
   };
+
   P._bhPullPlayer = function (dt) {
     this._bhInPull = false;
     if (this.crashed || this.phase !== "flight") return;
@@ -698,10 +762,10 @@
     h.r = m[4] * sc; h.dw = m[0] * sc; h.dh = m[1] * sc; h.ox = m[2] * sc; h.oy = m[3] * sc; h.rot = 0; h.kind = 0;
     return h;
   };
-  P._pickup = function (kind, x, y) { // kind: 0 coin, 1 fuel, 2 shield, 3 magnet, 4 gem
+  P._pickup = function (kind, x, y) { // kind: 0 coin, 1 fuel, 2 shield, 3 magnet, 4 gem, 5 speed
     let p = null; for (let i = 0; i < this.pick.length; i++) if (!this.pick[i].on) { p = this.pick[i]; break; }
     if (!p) return;
-    const name = kind === 0 ? "coin_f0" : kind === 1 ? "fuel" : kind === 2 ? "shield" : kind === 3 ? "magnet" : "gem";
+    const name = kind === 0 ? "coin_f0" : kind === 1 ? "fuel" : kind === 2 ? "shield" : kind === 3 ? "magnet" : kind === 5 ? "speed" : "gem";
     const m = SPR[name], sc = (kind === 0 ? 34 : 46) / m[1];
     p.on = true; p.kind = kind; p.x = x; p.y = y; p.r = m[4] * sc; p.ph = this._rand() * 5;
     p.im = name + ".png"; p.dw = m[0] * sc; p.dh = m[1] * sc; p.ox = m[2] * sc; p.oy = m[3] * sc; p.sc = sc;
@@ -862,9 +926,11 @@
     if (this.gateN % T.fuelN === 0) this._pickup(1, gx, c);
     else {
       const q = R();
+      const sp = T.speed || 0;
       if (q < T.shield) this._pickup(2, gx, c);
       else if (q < T.shield + T.magnet) this._pickup(3, gx, c);
       else if (q < T.shield + T.magnet + T.gem) this._pickup(4, gx, c);
+      else if (q < T.shield + T.magnet + T.gem + sp) this._pickup(5, gx, c); // keep-bh-speed
     }
 
     // extras between gates (stray rocks / ember / comet) — never invade escape gap
@@ -1012,6 +1078,7 @@
           else if (p.kind === 1) this.fuel = Math.min(1, this.fuel + FUEL_REFILL);
           else if (p.kind === 2) this.shield = true;
           else if (p.kind === 3) this.magnetT = MAGNET_S;
+          else if (p.kind === 5) this.speedBuffT = SPEED_BUFF_S; // refresh duration; no stack multiply
           else this.coins = Math.min(100000, this.coins + GEM_COINS);
           this._spark(pxs, p.y, p.kind === 1 ? 2 : 0, 6, 140);
           break;
@@ -1547,10 +1614,11 @@
     const fi = this._get("fuel.png"); if (fi) x.drawImage(fi, 14, 61, 17, 24);
     const segs = Math.ceil(this.fuel * 10 - 1e-6), col = this.fuel > 0.35 ? "#4ED45A" : this.fuel > 0.15 ? "#F2B233" : "#E8483A";
     for (let i = 0; i < 10; i++) { x.fillStyle = i < segs ? col : "#1c2f4c"; x.fillRect(38 + i * 16, 66, 13, 14); }
-    if (this.shield || this.magnetT > 0) {
+    if (this.shield || this.magnetT > 0 || this.speedBuffT > 0) {
       let ix = 214;
       if (this.shield) { const im = this._get("shield.png"); if (im) x.drawImage(im, ix, 58, 28, 30); ix += 34; }
-      if (this.magnetT > 0) { const im = this._get("magnet.png"); if (im) x.drawImage(im, ix, 58, 29, 30); }
+      if (this.magnetT > 0) { const im = this._get("magnet.png"); if (im) x.drawImage(im, ix, 58, 29, 30); ix += 34; }
+      if (this.speedBuffT > 0) { const im = this._get("speed.png"); if (im) x.drawImage(im, ix, 58, 28, 28); }
     }
     // zone banner: in 0.25 s / hold 1.5 s / out 0.25 s
     const bt = this.t - this.bannerT;
@@ -1659,10 +1727,10 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
-      TILT_MAX, TILT_RATE, FLIGHT_PLUME,
+      TILT_MAX, TILT_RATE, FLIGHT_PLUME, SPEED_BUFF_S, SPEED_BUFF_MULT,
       // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
       BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
-      BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
+      BH_MIN_KM, BH_FRONT_DEAD, BH_EARLY_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
