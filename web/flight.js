@@ -1,7 +1,8 @@
 /* RocketBay FLIGHT MODE v1 / flight2c live / bh1g-lab (blackhole-v1)
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
- * core-only hitbox, spin, soft 1/r^2 pull (no soft-R free zone), swallow death (no crash boom on BH),
- * L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5; lab-only ~3 early burst.
+ * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
+ * swallow death (no crash boom on BH), L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5;
+ * lab-only ~3 early burst.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -33,8 +34,10 @@
   // BLACKHOLE v1 / bh1g (named tunables — CoE playtest; lab-only global pull + strong-G)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
   // Base size as-is at early depth; draw+pullR grow with depth (pullR = debug/vignette/spawn only).
-  // BH_GLOBAL_PULL = true — while BH active, player+hazards feel a=BH_G/(r^2+BH_SOFT) at ANY distance
+  // BH_GLOBAL_PULL = true — while BH active, player+hazards feel pull at ANY distance
   // (no soft-R "free outside R"). BH_PULL_R kept for vignette / hitbox ring / spawn clog escape.
+  // Force law (equiv 1/r² feel that fights at range): a = BH_G / (BH_FALL*r + BH_SOFT)
+  // With BH_G=6.7M + BH_FALL=12, a at r~400–600 is hundreds of px/s² (vs GRAVITY=1400).
   const BH_GLOBAL_PULL = true;           // bh1g: acceleration never gated by pullR
   const BH_DRAW_SCALE = 1.0;             // native art — do NOT interim-upscale (would double-size)
   const BH_DRAW_W = 208;                 // base early-depth draw width (depth scale applies on top)
@@ -42,8 +45,9 @@
   // bh1e BH_G=2235600. bh1f: ×3 → 6706800. bh1g keeps strong-G; removes soft-R free zone.
   const BH_G_PREV = 2235600;             // bh1e player pull (document before)
   const BH_G_MULT = 3;                   // × vs bh1e BH_G (exact 3× strong-G lab)
-  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 6706800 — a = BH_G / (r^2 + BH_SOFT)
-  const BH_SOFT = 3200;                  // epsilon so force doesn't explode at r→0
+  const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 6706800 — kept; falloff via BH_FALL
+  const BH_FALL = 12;                    // linear falloff scale: a = BH_G/(BH_FALL*r+BH_SOFT); challenges at hundreds of px
+  const BH_SOFT = 3200;                  // epsilon so force doesn't explode at r→0 (soft core)
   const BH_OTHER = 0.40;                 // was 0.38 @ bh1e; stay ~0.25–0.4× player; nudge with G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
   const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
@@ -573,7 +577,7 @@
   };
 
   // BLACKHOLE v1 / bh1g: rare well ahead of camera. Escape = skirt above/below.
-  // Core-only death; arms/ring spin. Global 1/r^2 pull while BH alive (BH_GLOBAL_PULL; pullR visual/spawn).
+  // Core-only death; arms/ring spin. Global BH_FALL pull while BH alive (BH_GLOBAL_PULL; pullR visual/spawn).
   // Full path: random gaps, one-at-a-time, L1 gets 1–2. Lab: ~3 early sequential only.
   P._spawnBlackholes = function () {
     if (this.t < this.nextBhAt) return;
@@ -672,7 +676,8 @@
       // vignette stays soft-R scoped (visual); acceleration applies at any distance
       if (dist < pullR) this._bhInPull = true;
       // radial accel toward core; player X is fixed so only vertical component fights thrust
-      const a = BH_G / (dist * dist + BH_SOFT);
+      // a = BH_G/(BH_FALL*r+BH_SOFT) — equiv that fights at range; soft-core epsilon at r→0
+      const a = BH_G / (BH_FALL * dist + BH_SOFT);
       this.vy += a * (dy / dist) * dt;
     }
   };
@@ -915,7 +920,7 @@
           const dx = bh.x - h.x, dy = bh.y - h.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < 1) continue; // BH_GLOBAL_PULL: hazards feel pull at any distance
-          const a = (BH_G * BH_OTHER) / (dist * dist + BH_SOFT);
+          const a = (BH_G * BH_OTHER) / (BH_FALL * dist + BH_SOFT);
           h.vx += a * (dx / dist) * dt;
           h.vy += a * (dy / dist) * dt;
         }
@@ -1526,8 +1531,8 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
-      // BLACKHOLE tunables (bh1g dump)
-      BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
+      // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
+      BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
     },
   };
