@@ -33,3 +33,8 @@ Target 60 fps at 390×844 and 844×390. Evidence: `fps.json` (swiftshader, 60 s 
 
 ## Not deployed to live
 Live `rocketbay-game.web.app` remains **audio1**. Only preview channel `flight` + Firestore rules (leaderboard) were deployed.
+
+## Select-fix (flight1b)
+- Global `user-select: none` + `-webkit-touch-callout: none` + transparent tap highlight on html/body/stage/chrome/flight UI; text fields (`#fbCard` textarea/input, `#nameCard` input) keep `user-select: text`.
+- `selectstart`/`dragstart` prevented outside editables; `touchstart`/`mousedown` `preventDefault` on `#flightCanvas` only (tray + assemble tap-to-swap untouched).
+- Build label: `flight1b`. Evidence: `coe-playtest/flight-v1/select-fix/`.

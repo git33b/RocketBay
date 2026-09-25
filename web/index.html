@@ -17,10 +17,22 @@
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body, #stage, #world, #plateWrap, #chrome, #flightCanvas, .flBtn, #result, #hud, #countdownHud, #buildLabel, #firstHint, #fbBtn, #pauseBox, button, .chip, .card, .panel, .lbrow, .pill {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
     html, body {
       margin: 0; height: 100%; background: #000; color: #fff;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      overflow: hidden; user-select: none;
+      overflow: hidden;
+    }
+    /* Real text fields stay selectable / editable */
+    #fbCard textarea, #fbCard input, #nameCard input, textarea, input[type="text"], input:not([type]), input[type="search"], input[type="email"] {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
     }
     #stage {
       position: fixed; inset: 0;
@@ -243,7 +255,7 @@
     #fbStatus.ok { color: #9dfcc0; } #fbStatus.err { color: #ffb4a6; }
     /* ---- FLIGHT MODE v1 ---- */
     #todRow { display: none !important; }            /* TOD is automatic (local clock); ?tod= override for testing */
-    #flightCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 30; display: none; touch-action: none; background: #050a18; }
+    #flightCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 30; display: none; touch-action: none; background: #050a18; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
     .flBtn { position: fixed; z-index: 35; display: none; align-items: center; justify-content: center; gap: 8px; padding: 0;
       background: rgba(10,28,58,.8); border: 2px solid #64D2FF; box-shadow: inset 0 0 0 1px #3C6385; border-radius: 6px;
       color: #E1F2FF; font: 700 16px/1 "DejaVu Sans", Verdana, system-ui, sans-serif; letter-spacing: .02em; touch-action: none; }
@@ -386,15 +398,15 @@
 
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=audio1"></script>
-  <script src="audio.js?v=flight1"></script>
-  <script src="liftoff.js?v=flight1"></script>
-  <script src="flight.js?v=flight1"></script>
+  <script src="audio.js?v=flight1b"></script>
+  <script src="liftoff.js?v=flight1b"></script>
+  <script src="flight.js?v=flight1b"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "audio1";
     const PAD_VER = "pad5";
-    const APP_VER = "flight1";
+    const APP_VER = "flight1b";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1164,6 +1176,18 @@
       flDeploy.querySelector(".t").innerHTML = st === "used" ? 'DEPLOYED<span class="ck">\u2713</span>' : st === "ready" ? "DEPLOY" : 'DEPLOY <span class="lk">\u{1F512}\uFE0E</span>';
       flDeploy.setAttribute("aria-label", st === "used" ? "Payload deployed" : st === "ready" ? "Deploy payload" : "Deploy payload (available from 300 km)");
     }
+    // Kill browser text selection / callouts on taps (keep chrome tray scrollable)
+    const isEditable = (el) => !!(el && (el.closest && el.closest("textarea, input, [contenteditable=true]")));
+    document.addEventListener("selectstart", (e) => { if (!isEditable(e.target)) e.preventDefault(); });
+    document.addEventListener("dragstart", (e) => { if (!isEditable(e.target)) e.preventDefault(); });
+    // Only on flight hold surface — do NOT bind #stage/#chrome (breaks tap-to-swap + tray scroll)
+    const noSelectSurf = (el) => {
+      if (!el) return;
+      const kill = (e) => { if (isEditable(e.target)) return; e.preventDefault(); };
+      el.addEventListener("touchstart", kill, { passive: false });
+      el.addEventListener("mousedown", kill);
+    };
+    noSelectSurf(flCanvas);
     // hold anywhere = thrust (multi-touch safe: counts active pointers on the canvas)
     const holdIds = new Set();
     const holdSync = () => { if (flight) flight.setHold(holdIds.size > 0); };
