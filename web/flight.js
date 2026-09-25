@@ -1,6 +1,6 @@
-/* RocketBay FLIGHT MODE v1 / flight2c live / bh1f-lab (blackhole-v1)
- * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1f = 3× gravity over bh1e,
- * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH),
+/* RocketBay FLIGHT MODE v1 / flight2c live / bh1g-lab (blackhole-v1)
+ * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
+ * core-only hitbox, spin, soft 1/r^2 pull (no soft-R free zone), swallow death (no crash boom on BH),
  * L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5; lab-only ~3 early burst.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
@@ -30,17 +30,20 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
-  // BLACKHOLE v1 / bh1f (named tunables — CoE playtest; lab-only strong-G)
+  // BLACKHOLE v1 / bh1g (named tunables — CoE playtest; lab-only global pull + strong-G)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
-  // Base size as-is at early depth; draw+pullR grow with depth. Player pull 3× over bh1e.
+  // Base size as-is at early depth; draw+pullR grow with depth (pullR = debug/vignette/spawn only).
+  // BH_GLOBAL_PULL = true — while BH active, player+hazards feel a=BH_G/(r^2+BH_SOFT) at ANY distance
+  // (no soft-R "free outside R"). BH_PULL_R kept for vignette / hitbox ring / spawn clog escape.
+  const BH_GLOBAL_PULL = true;           // bh1g: acceleration never gated by pullR
   const BH_DRAW_SCALE = 1.0;             // native art — do NOT interim-upscale (would double-size)
   const BH_DRAW_W = 208;                 // base early-depth draw width (depth scale applies on top)
-  const BH_PULL_R = 520;                 // bh1e 444 → bh1f 520 (widen soft R so skim yanks before core)
-  // bh1e BH_G=2235600. bh1f: ×3 → 6706800. Soft R widened; base art as-is at early depth.
+  const BH_PULL_R = 520;                 // debug ring / vignette / spawn clog only — NOT an accel gate
+  // bh1e BH_G=2235600. bh1f: ×3 → 6706800. bh1g keeps strong-G; removes soft-R free zone.
   const BH_G_PREV = 2235600;             // bh1e player pull (document before)
   const BH_G_MULT = 3;                   // × vs bh1e BH_G (exact 3× strong-G lab)
   const BH_G = Math.round(BH_G_PREV * BH_G_MULT); // 6706800 — a = BH_G / (r^2 + BH_SOFT)
-  const BH_SOFT = 3200;                  // softens singularity near core
+  const BH_SOFT = 3200;                  // epsilon so force doesn't explode at r→0
   const BH_OTHER = 0.40;                 // was 0.38 @ bh1e; stay ~0.25–0.4× player; nudge with G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
   const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
@@ -569,8 +572,8 @@
     }
   };
 
-  // BLACKHOLE v1 / bh1f: rare well ahead of camera. Escape = skirt above/below.
-  // Core-only death; arms/ring spin. Soft 1/r^2 pull inside per-BH pullR (depth-scaled).
+  // BLACKHOLE v1 / bh1g: rare well ahead of camera. Escape = skirt above/below.
+  // Core-only death; arms/ring spin. Global 1/r^2 pull while BH alive (BH_GLOBAL_PULL; pullR visual/spawn).
   // Full path: random gaps, one-at-a-time, L1 gets 1–2. Lab: ~3 early sequential only.
   P._spawnBlackholes = function () {
     if (this.t < this.nextBhAt) return;
@@ -664,9 +667,10 @@
       const hx = h.x - cam * h.par;
       const dx = hx - this.px, dy = h.y - this.py;
       const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) continue; // tiny epsilon only — BH_GLOBAL_PULL: no soft-R free zone
       const pullR = h.pullR || BH_PULL_R;
-      if (dist >= pullR || dist < 1) continue;
-      this._bhInPull = true;
+      // vignette stays soft-R scoped (visual); acceleration applies at any distance
+      if (dist < pullR) this._bhInPull = true;
       // radial accel toward core; player X is fixed so only vertical component fights thrust
       const a = BH_G / (dist * dist + BH_SOFT);
       this.vy += a * (dy / dist) * dt;
@@ -910,7 +914,7 @@
           const bh = bhs[b];
           const dx = bh.x - h.x, dy = bh.y - h.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist >= (bh.pullR || BH_PULL_R) || dist < 1) continue;
+          if (dist < 1) continue; // BH_GLOBAL_PULL: hazards feel pull at any distance
           const a = (BH_G * BH_OTHER) / (dist * dist + BH_SOFT);
           h.vx += a * (dx / dist) * dt;
           h.vy += a * (dy / dist) * dt;
@@ -1206,7 +1210,7 @@
           x.strokeStyle = "rgba(255,80,120,0.9)"; x.lineWidth = 2;
           x.beginPath(); x.arc(sx, h.y, h.r, 0, Math.PI * 2); x.stroke(); // CORE death
           x.strokeStyle = "rgba(180,100,255,0.35)"; x.lineWidth = 1;
-          x.beginPath(); x.arc(sx, h.y, h.pullR || BH_PULL_R, 0, Math.PI * 2); x.stroke(); // soft pull
+          x.beginPath(); x.arc(sx, h.y, h.pullR || BH_PULL_R, 0, Math.PI * 2); x.stroke(); // pullR ref ring (accel is global)
           x.restore();
         }
       }
@@ -1250,7 +1254,7 @@
       x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
       x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
     }
-    // cheap pull vignette (skip-heavy; only while inside BH soft radius)
+    // cheap pull vignette (skip-heavy; soft-R scoped visual only — pull itself is global)
     if (this._bhInPull && !this.crashed) {
       x.fillStyle = "rgba(40,10,60,0.12)";
       x.fillRect(0, 0, VW, WORLD_H);
@@ -1522,8 +1526,8 @@
       WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS,
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
-      // BLACKHOLE tunables (bh1f dump)
-      BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
+      // BLACKHOLE tunables (bh1g dump)
+      BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
     },
   };
