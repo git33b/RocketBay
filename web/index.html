@@ -418,7 +418,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1-lab" : "bh1";
+    const APP_VER = LAB ? "bh1b-lab" : "bh1b";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 

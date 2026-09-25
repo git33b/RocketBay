@@ -1,6 +1,6 @@
-/* RocketBay FLIGHT MODE v1 / bh1 (blackhole-v1 branch)
- * flight-pack-v1.3.2 + BLACKHOLE v1: rare gravity-well hazard, core-only hitbox,
- * spin, soft 1/r^2 pull on player + lighter field pull on other hazards/meteors.
+/* RocketBay FLIGHT MODE v1 / bh1b (blackhole-v1 branch)
+ * flight-pack-v1.3.2 + BLACKHOLE v1 feel pass: bigger on-screen BH + stronger gravity,
+ * core-only hitbox, spin, soft 1/r^2 pull on player + lighter field pull on other hazards.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -29,13 +29,18 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
-  // BLACKHOLE v1 (named tunables — CoE playtest)
-  const BH_PULL_R = 240;                 // soft pull radius (design px); outside = free
-  const BH_G = 460000;                   // radial accel scale: a = BH_G / (r^2 + BH_SOFT)
+  // BLACKHOLE v1 / bh1b feel pass (named tunables — CoE playtest)
+  // Interim draw-scale of current sprites/hazard-blackhole.png (~108px native).
+  // When architect gates a larger native sprite into that stable path, reset BH_DRAW_SCALE→1
+  // and retune BH_DRAW_W / SPR native size; pull mults stay independent.
+  const BH_DRAW_SCALE = 1.85;            // on-screen × vs bh1 (target band 1.7–2.0)
+  const BH_DRAW_W = Math.round(104 * BH_DRAW_SCALE); // 192 — typical on-screen width
+  const BH_PULL_R = Math.round(240 * BH_DRAW_SCALE); // 444 — soft radius tracks bigger well
+  const BH_G_MULT = 1.8;                 // player pull × vs bh1 (target band 1.6–2.0)
+  const BH_G = Math.round(460000 * BH_G_MULT); // 828000 — a = BH_G / (r^2 + BH_SOFT)
   const BH_SOFT = 3200;                  // softens singularity near core
-  const BH_OTHER = 0.32;                 // other deadly haz/meteors feel ~0.25–0.4× player pull
+  const BH_OTHER = 0.32;                 // other deadly haz/meteors ~0.25–0.4× player; rises with BH_G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
-  const BH_DRAW_W = 104;                 // typical on-screen width
   const BH_MIN_KM = 95;                  // L1 rare/absent until ~this depth (or phaseT gate)
   const BH_GAP0 = 26, BH_GAP1 = 12;      // seconds between BH spawns (L1 → deep)
   const SIM_DT = 1 / 120;
@@ -63,7 +68,7 @@
   const DEBRIS_DRAW = { // typical draw widths from qa-flight-pack-v1.3-debris.json
     "hazard-station": 140, "hazard-telescope": 110, "hazard-satellite": 84,
     "hazard-wreckage_0": 70, "hazard-wreckage_1": 72, "hazard-wreckage_2": 64,
-    "hazard-meteor": 64, "hazard-blackhole": 104,
+    "hazard-meteor": 64, "hazard-blackhole": BH_DRAW_W,
   };
 
   const ZONES = [
