@@ -13,7 +13,7 @@
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
-  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s5" />
+  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s5b" />
   <title>Launch Pad</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
@@ -413,10 +413,10 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=gp1-beta-s5"></script>
-  <script src="audio.js?v=gp1-beta-s5"></script>
-  <script src="liftoff.js?v=gp1-beta-s5"></script>
-  <script src="flight.js?v=gp1-beta-s5"></script>
+  <script src="modular.js?v=gp1-beta-s5b"></script>
+  <script src="audio.js?v=gp1-beta-s5b"></script>
+  <script src="liftoff.js?v=gp1-beta-s5b"></script>
+  <script src="flight.js?v=gp1-beta-s5b"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -424,7 +424,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s5";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s5b";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 

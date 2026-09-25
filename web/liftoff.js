@@ -20,8 +20,8 @@
   const ZOOM_LAND_FLOOR = 0.58; // landscape zoom floor: adaptive per stack (tall stacks need room for the plume)
   const ZOOM_PORT_MIN = 0.62; // portrait zoom floor (play scale)
   const ZOOM_PORT_TARGET = 0.70; // v5: late-climb handoff framing (full rocket+plume readable, matches settle)
-  const SEAM_LB_START = 2.05; // v5: box toss starts at join window (was 1.15 — arrived lbA=1 at handoff)
-  const SEAM_LB_END = 2.85;   // v5: still rising at handoff (~0.5); settle finishes the ease
+  const SEAM_LB_START = 1.95; // v5: box toss during join (was 1.15 — arrived lbA=1 at handoff)
+  const SEAM_LB_END = 2.75;   // v5: ~0.5 at handoff ~2.45; settle finishes the ease
   const PLUME_MIN_CSS = 170;  // landscape follow: keep >=170 px of plume on screen below the nozzle
   const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow
   const NOSE_FRAC_LAND = 0.05; // landscape: nose ~5% below the top edge
@@ -2071,7 +2071,7 @@
         // v4 used opaque-sky D-bound like landscape; D never grew enough so zAllowed stayed 1
         // through handoff (hull close-up / flame clipped / framing pop into settle earth view).
         // Ignore sky floor here — flight takes over mid-air. Early climb stays pad-close.
-        const zu = smooth01(0.65, 2.05, this.climbT); // ~0 @0.65 → 1 by ~2.05 (target ~0.70 at handoff)
+        const zu = smooth01(1.00, 2.40, this.climbT); // v5b: still pulling out through 2.05–2.40 (target ~0.70 at handoff)
         zAllowed = 1 + (ZOOM_PORT_TARGET - 1) * zu;
       }
       {
@@ -2235,11 +2235,12 @@
           ? global.__liftoffState.noseScreenY
           : (this._tipLocal0 != null ? z * (this._tipLocal0 - this.rocketY * ((this._lb && this._lb.height / this._lb.nh) || 1)) + (this._camYi || 0) : wrapH * 0.2);
         // v5: wait until zoom-out has pulled toward play (~2.25+) before early handoff on portrait.
-        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.25 && z <= HANDOFF_ZOOM_PORT);
+        // v5b: hold portrait early-handoff until zoom+box have progressed (~2.40); prefer CLIMB_DUR.
+        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.40 && z <= HANDOFF_ZOOM_PORT);
         // Follow parks nose ~10% down — that is healthy framing, NOT a vanish.
-        // Only nearTop-bail if nose is truly leaving the frame (<2% / negative).
-        const nearTop = t >= 2.0 && noseSy < wrapH * 0.02;
-        // v5 target: handoff into play ~2.31 (CLIMB_DUR=2.45) with zoom~0.70 + partial letterbox.
+        // Only nearTop-bail if nose is truly leaving the frame (<1% / negative).
+        const nearTop = t >= 2.3 && noseSy < wrapH * 0.01;
+        // v5b target: handoff into play ~2.31–2.45 with zoom~0.70 + seamLbA~0.5.
         if (t >= CLIMB_DUR || earlyZoom || nearTop) {
           this.running = false;
           this.finished = true;
