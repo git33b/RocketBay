@@ -33,7 +33,7 @@
   const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
   const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
   const TIERS = [ // pack tiers (speed band -> density)
-    { max: 420, spacing: 720, gap: 300, extra: 1.4, shift: 160, arcs: 1.2, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02 },
+    { max: 420, spacing: 640, gap: 300, extra: 1.6, shift: 160, arcs: 1.2, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02 },
     { max: 490, spacing: 640, gap: 265, extra: 1.8, shift: 180, arcs: 1.1, fuelN: 5, shield: 0.07, magnet: 0.07, gem: 0.03 },
     { max: 560, spacing: 590, gap: 235, extra: 2.2, shift: 190, arcs: 1.0, fuelN: 4, shield: 0.08, magnet: 0.07, gem: 0.04 },
     { max: 1e9, spacing: 560, gap: 210, extra: 2.6, shift: 200, arcs: 0.9, fuelN: 4, shield: 0.10, magnet: 0.06, gem: 0.05 },
@@ -349,7 +349,7 @@
         this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
         this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
         if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
-        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextMeteorAt = this.t + 4 + this._rand() * 3; }
+        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; }
       }
       return;
     }
@@ -385,8 +385,8 @@
       this._stepObjects(dt);
       if (this.practiceT >= 4.0) {
         this.phase = "flight"; this.phaseT = 0; this.hazardsOn = true;
-        this.nextGateX = this.cam + this.viewW * 0.85 + 220;
-        this.nextMeteorAt = this.t + 2.5 + this._rand() * 2;
+        this.nextGateX = this.cam + this.viewW * 0.45 + 120;
+        this.nextMeteorAt = this.t + 1.8 + this._rand() * 1.2;
         this._log("hazards", this.t);
       }
       return;
