@@ -413,14 +413,14 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=audio1"></script>
+  <script src="modular.js?v=gp1-beta"></script>
   <script src="audio.js?v=gp1-beta"></script>
   <script src="liftoff.js?v=gp1-beta"></script>
   <script src="flight.js?v=gp1-beta"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
-    const KIT_VER = "audio1";
+    const KIT_VER = "gp1-beta";
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
