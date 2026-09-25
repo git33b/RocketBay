@@ -1,5 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
- * GP1-BETA s5: pad zoom-out + plume + box ease into play (no framing pop), tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
+ * GP1-BETA s6: continuous zoom-from-liftoff into play (matched handoff, no cut/teleport), tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
@@ -21,13 +21,13 @@
   const CLIMB_T = 3.4, PITCH_T = 1.85;       // climb kept for non-seam paths; pitch after settle
   const SEAM_ZOOM0 = 1.82;                   // legacy pad-column framing (unused when seamFromPad)
   const SEAM_ZOOM1 = 1.28;                   // legacy end-of-climb zoom
-  const ZOOM_PORT_REF = 0.70;               // v5: pad late-climb target → maps handoff.zoom into flight camZoom
-  const SETTLE_T = 0.72;                     // v5: short settle — handoff already ~2.31 at play framing; ~1-2s sooner to control
-  const SETTLE_ZOOM0 = 1.06;                 // v5: nearer gameplay (pad hands off ~0.70); eases OUT to 1
+  const ZOOM_PORT_REF = 0.70;               // pad play-scale target → maps handoff.zoom into flight camZoom
+  const SETTLE_T = 0.72;                     // short settle — pad already at play framing; ~1-2s sooner to control
+  const SETTLE_ZOOM0 = 1.00;                 // v6: pad hands off at play scale → seed 1.0 (no 0.70→1.00 / 1.06 tug)
   const HUD_ZOOM_ON = 1.04;                  // game HUD appears once camZoom reaches gameplay scale
-  const SETTLE_FALL = 55;                    // design-px downward ease during settle (loss of climb thrust)
+  const SETTLE_FALL = 40;                    // v6: gentler fall (matched mid-air; was 55 pop-feel)
   const LB_EASE_START = 0.00;                // letterbox continues from pad seamLbA (no snap-in box)
-  const LB_EASE_END = 0.85;                  // v5: finish box toss during settle (pad arrives ~0.5, not 1)
+  const LB_EASE_END = 0.90;                  // v6: finish box toss during settle (pad arrives ~0.62 co-eased)
   // (removed PITCH_XFADE — no alpha crossfade of two unrelated worlds)
   const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
@@ -325,26 +325,41 @@
       this.bodyY = 720;
       this._log("lab", this.t);
     } else if (cfg && (cfg.seamFromPad || cfg.skipClimb)) {
-      // v5 composite seam: pad already zoomed toward play + partial letterbox. Seed from handoff
-      // so first flight frame continues the same framing — never re-show pad / never camY climb.
+      // v6 composite seam: pad already at play scale + co-eased letterbox. Seed from handoff so
+      // first flight frame matches pad last (zoom/lb/rocketY/plume) — never climb, never teleport.
       this.phase = "settle"; this.phaseT = 0;
       this.cam = -120; this.camY = 0; this.dist = 0;
       const ho = (cfg && cfg.handoff) || {};
-      // Map pad zoom (≤1 zoomed-out) → flight camZoom (≥1 zoomed-in). Continuity over snap.
-      // v5: pad z≈0.70 → ~1.06; pad z=0.62 → ~1.0; pad z=1 (legacy) → ~1.18
+      // Pad z≈ZOOM_PORT_REF(0.70) → flight camZoom 1.0 (play). No settle tug if already there.
       let z0 = SETTLE_ZOOM0;
       if (ho.zoom != null && ho.zoom > 0) {
-        z0 = clamp(1 + (ho.zoom - ZOOM_PORT_REF) * 0.55, 1.0, 1.20);
+        if (Math.abs(ho.zoom - ZOOM_PORT_REF) <= 0.06) z0 = 1.0;
+        else z0 = clamp(1 + (ho.zoom - ZOOM_PORT_REF) * 0.55, 1.0, 1.15);
       }
-      const lb0 = (this.letterbox && ho.seamLbA != null) ? clamp(ho.seamLbA, 0, 0.85) : (this.letterbox ? 0.35 : 0);
+      const lb0 = (this.letterbox && ho.seamLbA != null) ? clamp(ho.seamLbA, 0, 0.85) : (this.letterbox ? 0.45 : 0);
       this.camZoom = z0; this._settleZoom0 = z0;
       this.lbA = lb0; this._settleLb0 = lb0; this.climbExit = 1;
-      this.px = this.viewW * 0.5; this.py = 360; this.vy = -90; this.tilt = -Math.PI / 2;
+      this.px = this.viewW * 0.5;
+      // Seed rocket Y from pad nose screen position so first settle frame doesn't teleport.
+      let py0 = 360;
+      if (ho.noseScreenY != null && ho.wrapH > 0 && this.letterbox) {
+        const ch = ho.wrapH, cw = ho.wrapW || 390;
+        let s = ch / WORLD_H, viewW = cw / s;
+        if (viewW < MIN_VIEW_W) s = cw / MIN_VIEW_W;
+        const bandH = WORLD_H * s;
+        const oy = Math.max(0, (ch - bandH) / 2);
+        const bar = oy * lb0;
+        // nose → approx rocket centre in design px (vertical stack, axis ~0.42 len below nose)
+        const noseInBand = (ho.noseScreenY - bar) / Math.max(1e-3, s);
+        py0 = clamp(noseInBand + ROCKET_LEN * 0.42, 220, 500);
+      }
+      this.py = py0; this.vy = -70; this.tilt = -Math.PI / 2;
       this.speed = 0; this.hazardsOn = false; this._climbShake = 0;
-      this._hudOn = false; this._settlePy0 = 360;
+      this._hudOn = false; this._settlePy0 = py0;
       this.bodyY = 720;
+      this._seamHideBody = true; // v6: suppress earth limb until pitch (pad last frame is starfield)
       // Continue pad plume (handoff.flame) — no second engine-start blast; keep readable into settle
-      const fl = (ho.flame != null && ho.flame > 0) ? clamp(ho.flame / 1.35, 0.45, 1) : 0.85;
+      const fl = (ho.flame != null && ho.flame > 0) ? clamp(ho.flame / 1.35, 0.55, 1) : 0.9;
       this._seamPlume = fl;
       this._log("settle", this.t);
     }
@@ -470,7 +485,12 @@
       this.speed = SPEED0 * 0.15 * eu;
       this.cam += this.speed * dt;
       this.bodyY = 720;
-      if (this.camZoom <= HUD_ZOOM_ON) this._hudOn = true;
+      // v6: when seeded at play zoom (1.0), don't flash HUD on frame 0 — ease it in mid-settle.
+      if (this.cfg && this.cfg.seamFromPad) {
+        if (this.phaseT >= SETTLE_T * 0.45) this._hudOn = true;
+      } else if (this.camZoom <= HUD_ZOOM_ON) {
+        this._hudOn = true;
+      }
       this._notifyHud();
       if (this.phaseT >= SETTLE_T) {
         this.phase = "pitch"; this.phaseT = 0;
@@ -1279,7 +1299,7 @@
     // Single rocket in seam camera space — scale tracks camZoom continuously (still inside play clip)
     const thrusting = this.phase === "climb" || this.phase === "pitch" || (this.phase === "settle" && this.phaseT < SETTLE_T * 0.55);
     const plume = this.phase === "climb" ? CLIMB_PLUME
-      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.85) * CLIMB_PLUME * (1 - 0.55 * clamp(this.phaseT / SETTLE_T, 0, 1)))
+      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.40 * clamp(this.phaseT / SETTLE_T, 0, 1)))
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
     const sh = this._climbShake || 0;
     const rx = this.px + (sh ? Math.sin(this.t * 47) * sh : 0);
@@ -1489,6 +1509,9 @@
     const VW = this.viewW;
     let im = null, y = 720;
     const U = this._artU(), k = Math.floor(U / SEG), o = U - k * SEG, z = mod(k, 6), Z = ZONES[z];
+    // v6: during pad→flight settle, keep earth limb hidden (pad last frame is starfield) so
+    // first visible flight frame matches pad — limb eases in during pitch.
+    if (this.phase === "settle" && this._seamHideBody) return;
     if (this.phase === "pitch" || (z === 0 && k === 0)) {
       im = this._get("earth-limb.png");
       if (this.phase === "pitch") y = this.bodyY;

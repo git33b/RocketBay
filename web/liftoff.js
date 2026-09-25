@@ -3,7 +3,8 @@
  * Cellular flame (hull-scaled, altitude plume), dithered opaque smoke, long t² flight
  * with accelerating follow cam, altitude sky + parallax clouds / streaking stars.
  * Timing: T-5 countdown, T-2 ignition, 0.5s hold, t² climb + zoom-out, mid-air handoff (no exit fly-off).
- * gp1-beta seam v5: pad climb zooms out + letterbox eases during join; hand off mid-air at play framing.
+ * gp1-beta seam v6: zoom-out from liftoff continuously into play scale; letterbox co-eases with zoom;
+ * matched pad→flight handoff (no cut/teleport); box tosses with zoom, never snaps full.
  */
 (function (global) {
   "use strict";
@@ -11,20 +12,22 @@
   const BUILD = "gp1s3";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
-  const CLIMB_DUR = 2.45;  // v5: hand off ~2.31 into play (was 4.2; kills vanish/snap dead air, ~2s sooner control)
+  const CLIMB_DUR = 2.45;  // v6: hand off ~2.31–2.45 into play (was 4.2; kills vanish/snap dead air)
   const EXIT_DUR = 0.0;    // unused — no off-screen exit; flight owns settle after handoff
   const HANDOFF_ZOOM_LAND = 0.92; // landscape: prefer handoff once zoomed out past this (or at CLIMB_DUR)
-  const HANDOFF_ZOOM_PORT = 0.78; // portrait: handoff once zoomed out past this (or at CLIMB_DUR)
+  const HANDOFF_ZOOM_PORT = 0.74; // v6: portrait handoff once near play scale (zoom from liftoff hits earlier)
   const CLIMB_A = 140;
   const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
   const ZOOM_LAND_FLOOR = 0.58; // landscape zoom floor: adaptive per stack (tall stacks need room for the plume)
   const ZOOM_PORT_MIN = 0.62; // portrait zoom floor (play scale)
-  const ZOOM_PORT_TARGET = 0.70; // v5: late-climb handoff framing (full rocket+plume readable, matches settle)
-  const SEAM_LB_START = 1.95; // v5: box toss during join (was 1.15 — arrived lbA=1 at handoff)
-  const SEAM_LB_END = 2.75;   // v5: ~0.5 at handoff ~2.45; settle finishes the ease
+  const ZOOM_PORT_TARGET = 0.70; // play-scale handoff framing (maps to flight camZoom≈1)
+  const ZOOM_PORT_START_T = 0.00; // v6: zoom-out begins at liftoff (climbT=0), not late 1.0 tug
+  const ZOOM_PORT_END_T = 2.35;   // v6: reach ~0.70 by handoff — continuous into play
+  const SEAM_LB_AT_HANDOFF = 0.62; // v6: box co-eases with zoom; partial at handoff, settle finishes
   const PLUME_MIN_CSS = 170;  // landscape follow: keep >=170 px of plume on screen below the nozzle
-  const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow
+  const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow (open frame)
   const NOSE_FRAC_LAND = 0.05; // landscape: nose ~5% below the top edge
+  const NOSE_FRAC_BAND = 0.12; // v6: once letterbox grows, park nose in visible band (match flight)
   const HULL_K = 1.3;         // flame sizing: modular core bottom width -> hull (fin-span) equivalent     // native px / s² (t² climb)
   const BUF_DIV = 2; // smoke/glow cells = 2 CSS px max (no mosaic)
 
@@ -2067,17 +2070,16 @@
         const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
         if (D > 1 && blendOk) zAllowed = clamp((wrapH + 8 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
       } else {
-        // Portrait composite seam (v5): SCHEDULE zoom-out toward play framing.
-        // v4 used opaque-sky D-bound like landscape; D never grew enough so zAllowed stayed 1
-        // through handoff (hull close-up / flame clipped / framing pop into settle earth view).
-        // Ignore sky floor here — flight takes over mid-air. Early climb stays pad-close.
-        const zu = smooth01(1.00, 2.40, this.climbT); // v5b: still pulling out through 2.05–2.40 (target ~0.70 at handoff)
+        // Portrait composite seam (v6): zoom-out from liftoff continuously into play scale.
+        // v5 started at climbT 1.0→2.40 (late tug then canvas swap). v6 pulls from climbT=0 so
+        // by handoff zoom≈ZOOM_PORT_TARGET (flight play scale) — one camera into play.
+        const zu = smooth01(ZOOM_PORT_START_T, ZOOM_PORT_END_T, this.climbT);
         zAllowed = 1 + (ZOOM_PORT_TARGET - 1) * zu;
       }
       {
         // Critically damped spring toward the allowed zoom (~0.6 s settle, C1: velocity starts
         // at 0 -> no jerk). A lagging spring on a falling bound stays above it -> plate never shows.
-        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = landscape ? 12 : 16; // v5: portrait tracks schedule (~0.3s) so late climb hits ~0.70
+        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = landscape ? 12 : 22; // v6: tighter portrait track so from-liftoff schedule hits ~0.70 by handoff
         let zs = this._zoomS || 1, vz = this._zoomV || 0;
         const acc = W * W * (zAllowed - zs) - 2 * W * vz;
         vz += acc * dtz; zs += vz * dtz;
@@ -2086,8 +2088,20 @@
         this._zoomS = zs; this._zoomV = vz;
         z = zs;
       }
-      const noseTarget = wrapH * (landscape ? NOSE_FRAC_LAND : NOSE_FRAC);
-      // never push the camera during the hold: start from the seated nose, glide to 10%
+      // v6: as letterbox grows, park nose inside the visible band (not full-viewport 10%)
+      // so pad last frame matches flight settle framing (rocket sits in the play strip).
+      let noseTarget = wrapH * (landscape ? NOSE_FRAC_LAND : NOSE_FRAC);
+      if (!landscape && (this._seamLbA || 0) > 0.02) {
+        const WORLD_H = 720, MIN_VIEW_W = 760;
+        let s = wrapH / WORLD_H, viewW = wrapW / s;
+        if (viewW < MIN_VIEW_W) s = wrapW / MIN_VIEW_W;
+        const bandH = WORLD_H * s;
+        const oy = Math.max(0, (wrapH - bandH) / 2);
+        const bar = oy * (this._seamLbA || 0);
+        const visH = Math.max(1, wrapH - 2 * bar);
+        noseTarget = bar + visH * NOSE_FRAC_BAND;
+      }
+      // never push the camera during the hold: start from the seated nose, glide to target
       // C1 soft pickup of width 2*Wp that converges EXACTLY on tgt; starts when the nose is
       // Wp below tgt, so the seated rocket never moves the camera during the hold.
       const Wp = clamp(noseSeat * 0.5, 8, 40);
@@ -2118,9 +2132,18 @@
         "translate3d(" + (this._tx + this._shakeX) + "px," + this._camYi + "px,0)" +
         (this._zoom !== 1 ? " scale(" + this._zoom + ")" : "");
     }
-    // Composite seam: opaque axis-aligned letterbox eases in during late pad climb (matches flight BL).
+    // Composite seam v6: letterbox co-eases with zoom (toss), never snaps full / never pre-full.
+    // Drive from zoom progress so box + pull-out stay locked; leave headroom for settle finish.
     {
-      const lbU = this.phase === "climb" ? smooth01(SEAM_LB_START, SEAM_LB_END, this.climbT) : (this.phase === "done" ? (this._seamLbA || 0) : 0);
+      let lbU = 0;
+      if (this.phase === "climb" && !landscape) {
+        const zNow = this._zoom || 1;
+        const zoomProg = clamp((1 - zNow) / Math.max(1e-6, 1 - ZOOM_PORT_TARGET), 0, 1);
+        // Start box slightly after zoom begins; arrive ~SEAM_LB_AT_HANDOFF when zoom hits play.
+        lbU = SEAM_LB_AT_HANDOFF * smooth01(0.06, 0.98, zoomProg);
+      } else if (this.phase === "done") {
+        lbU = this._seamLbA || 0;
+      }
       this._seamLbA = landscape ? 0 : lbU;
       this._updateSeamLetterbox(this._seamLbA);
     }
@@ -2234,13 +2257,13 @@
         const noseSy = (typeof global.__liftoffState === "object" && global.__liftoffState && global.__liftoffState.noseScreenY != null)
           ? global.__liftoffState.noseScreenY
           : (this._tipLocal0 != null ? z * (this._tipLocal0 - this.rocketY * ((this._lb && this._lb.height / this._lb.nh) || 1)) + (this._camYi || 0) : wrapH * 0.2);
-        // v5: wait until zoom-out has pulled toward play (~2.25+) before early handoff on portrait.
-        // v5b: hold portrait early-handoff until zoom+box have progressed (~2.40); prefer CLIMB_DUR.
-        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.40 && z <= HANDOFF_ZOOM_PORT);
-        // Follow parks nose ~10% down — that is healthy framing, NOT a vanish.
+        // v6: zoom starts at liftoff so play scale arrives earlier — allow early handoff once near target.
+        // Prefer CLIMB_DUR; early ok when zoom≈play and box has tossed with it.
+        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.15 && z <= HANDOFF_ZOOM_PORT);
+        // Follow parks nose in the visible band — that is healthy framing, NOT a vanish.
         // Only nearTop-bail if nose is truly leaving the frame (<1% / negative).
         const nearTop = t >= 2.3 && noseSy < wrapH * 0.01;
-        // v5b target: handoff into play ~2.31–2.45 with zoom~0.70 + seamLbA~0.5.
+        // v6 target: handoff into play ~2.2–2.45 with zoom~0.70 + seamLbA~0.55–0.65 (co-eased).
         if (t >= CLIMB_DUR || earlyZoom || nearTop) {
           this.running = false;
           this.finished = true;
