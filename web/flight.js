@@ -1156,15 +1156,14 @@
     x.imageSmoothingEnabled = false;
     x.fillStyle = "#050a18"; x.fillRect(0, 0, this.canvas.width, this.canvas.height);
     x.setTransform(s, 0, 0, s, 0, oy);
-    if (seam) {
-      // continuous seam: climb/pitch may paint full-bleed while lbA is low; letterbox drawn ON TOP after
-      this._drawSeam(x);
-    } else {
-      x.save(); x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
-      this._drawFlight(x);
-      x.restore();
-    }
-    // Solid dim bars ON TOP of world (no mirrored strip). Eases in as rocket settles flat.
+    // Play world (climb + pitch + flight) stays strictly in the axis-aligned band — never under letterbox.
+    x.save();
+    x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
+    x.fillStyle = "#050a18"; x.fillRect(0, 0, VW, WORLD_H); // voids from seamZoom stay navy rects, not wedges
+    if (seam) this._drawSeam(x);
+    else this._drawFlight(x);
+    x.restore();
+    // Opaque growing bars ON TOP (no alpha fade over world, no mirrored strip).
     if (this.letterbox && lb > 0.001) this._drawLetterbox(x, lb);
     if (this.letterbox && lb > 0.55) { // band edges = crash lines (only once letterbox has settled)
       const a = clamp((lb - 0.55) / 0.45, 0, 1) * 0.55;
@@ -1175,28 +1174,28 @@
     this._drawTutorial(x);
   };
   P._drawLetterbox = function (x, lbA) {
-    // Solid dim bars only. Prior mirrored _strip(scale 1,-1) + horizontal U scroll read as diagonal flow in phone corners.
+    // Opaque axis-aligned bars whose height grows with lbA. Hard horizontal play-band edge; no translucency / soft mask / mirrored strip.
     const VW = this.viewW, ext = this.oy / this.s + 4;
-    const a = 0.92 * (lbA == null ? 1 : lbA);
-    x.fillStyle = "rgba(5,10,24," + a.toFixed(3) + ")";
-    x.fillRect(0, -ext, VW, ext); x.fillRect(0, WORLD_H, VW, ext);
+    const u = lbA == null ? 1 : lbA;
+    const h = ext * u;
+    if (h <= 0) return;
+    x.fillStyle = "#050a18";
+    x.fillRect(0, -h, VW, h);
+    x.fillRect(0, WORLD_H, VW, h);
   };
   // Continuous climb→pitch→flight: one camZoom. Climb column through ascent; pitch continues on flight
   // strip at the same zoom (orbit already reads as stars — no stacked climb overlay / hard seam line).
   P._drawSeam = function (x) {
     const VW = this.viewW;
     const zoom = this.camZoom || 1;
+    // Caller already clipped to rect(0,0,VW,WORLD_H) — no pad into letterbox (pad caused zoomed void wedges under fading bars).
     if (this.phase === "climb") {
       this._drawClimb(x, true);
     } else {
       // pitch: flight world under shared camZoom (pivoted on rocket inside _drawFlight)
-      const pad = (1 - (this.lbA || 0)) * (this.oy / this.s + 8);
-      x.save();
-      x.beginPath(); x.rect(0, -pad, VW, WORLD_H + 2 * pad); x.clip();
       this._drawFlight(x, true);
-      x.restore();
     }
-    // Single rocket in seam camera space — scale tracks camZoom continuously
+    // Single rocket in seam camera space — scale tracks camZoom continuously (still inside play clip)
     const thrusting = true;
     const plume = this.phase === "climb" ? CLIMB_PLUME
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
