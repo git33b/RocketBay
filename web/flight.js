@@ -410,7 +410,8 @@
         this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
         this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
         if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
-        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 5 + this._rand() * 8); // bh1e: L1 can see first hole ~5–13s }
+        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 5 + this._rand() * 8); // bh1e: L1 can see first hole ~5–13s
+        }
       }
       return;
     }
