@@ -34,7 +34,7 @@
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
   const TILT_MAX = 10 * Math.PI / 180, TILT_RATE = 7;    // gp1-c2: ~10° nose-up while thrusting only
   const CLIMB_PLUME = 2.35;                  // climb flame length vs flight (match pad power)
-  const FLIGHT_PLUME = 2.85;                 // gp1-c2: longer cruise exhaust (dual-layer trail)
+  const FLIGHT_PLUME = 4.15;                 // gp1-c2: longer cruise exhaust (~1.2–1.5× body dual-layer)
   const CLIMB_SHAKE = 3.2;                   // climb cam shake amp (design px)
   const FUEL_DRAIN = 1 / 11;                 // tank fraction per second of thrust held (placeholder)
   const FUEL_REFILL = 0.5;                   // fuel pickup
@@ -1637,26 +1637,36 @@
         // gp1-c2 cruise: dual-layer (longer cool smoke trail + fire core), PSP-sharp fillRects
         const cruise = this.phase === "flight" || this.phase === "practice";
         if (cruise) {
-          const smokeL = L * 1.62;
-          const smHw = hw0 * 1.2;
-          x.fillStyle = "#2A2428"; x.fillRect(tailX - smokeL, y - smHw * 0.75, smokeL, smHw * 1.5);
-          x.fillStyle = "#4A3834"; x.fillRect(tailX - smokeL * 0.9, y - smHw * 0.6, smokeL * 0.9, smHw * 1.2);
-          // jagged tip nibble (no soft bloom)
-          if ((fl + i) % 2 === 0) {
-            x.fillStyle = "#1C181C";
-            x.fillRect(tailX - smokeL - 4, y - 2, 6, 3);
-            x.fillRect(tailX - smokeL + 5, y + smHw * 0.25, 7, 2);
-          } else {
-            x.fillStyle = "#1C181C";
-            x.fillRect(tailX - smokeL - 2, y + 1, 5, 2);
-            x.fillRect(tailX - smokeL + 8, y - smHw * 0.35, 6, 2);
+          // Longer dual-layer: cool smoke trail past fire core (PSP-sharp tapered bands)
+          const smokeL = L * 2.15;
+          const smHw = Math.max(3, hw0 * 0.95);
+          // smoke taper: 5 bands, longer & cooler
+          for (let b = 0; b < 5; b++) {
+            const u = b / 4;
+            const x1 = tailX - smokeL * (u + 0.22);
+            const x0 = tailX - smokeL * u * 0.85;
+            const w = Math.max(2, x0 - x1);
+            const half = smHw * (1.05 - 0.7 * u);
+            const j = ((fl + b + i) % 3) - 1;
+            x.fillStyle = u < 0.35 ? "#4A3834" : u < 0.7 ? "#2A2428" : "#1C181C";
+            x.fillRect(x1, y - half + j, w, half * 2);
           }
-        }
-        x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0, L, hw0 * 2);
-        x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
-        x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
-        if (ps > 1.6 || cruise) {
-          x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
+          // jagged tip
+          x.fillStyle = "#141018";
+          x.fillRect(tailX - smokeL - 5, y - 1 + (fl % 2), 7, 2);
+          x.fillRect(tailX - smokeL + 6, y + smHw * 0.3, 8, 2);
+          // fire core taper (nested)
+          x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0 * 0.95, L, hw0 * 1.9);
+          x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.7, y - hh * 0.9, L * 0.7, hh * 1.8);
+          x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.4, y - Math.max(2, 2.8 * sc), L * 0.4, Math.max(4, 5.6 * sc));
+          x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.18, y - 1.8 * sc, L * 0.18, 3.6 * sc);
+        } else {
+          x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0, L, hw0 * 2);
+          x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
+          x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
+          if (ps > 1.6) {
+            x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
+          }
         }
       }
     }
