@@ -686,9 +686,9 @@
     function nick(id) {
       if (!id || !KIT) return id || "";
       const L = (M()[id] && M()[id].label) || lbl(id) || id;
-      // short nick: drop repeated family words / "Booster"/"Stage" clutter
+      // short nick: drop stage/fairing clutter; keep family + role word
       return String(L)
-        .replace(/\b(Stage|Booster|Fairing|Core|Ship)\b/gi, "")
+        .replace(/\b(Stage|Booster|Fairing|Core|Ship|Tank)\b/gi, "")
         .replace(/\s+/g, " ").trim() || L;
     }
     function summaryLine() {
