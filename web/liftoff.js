@@ -1,15 +1,16 @@
 /**
- * Rocket Bay — LIFTOFF-FEEL v3 polish
+ * Rocket Bay — LIFTOFF-FEEL v3 polish + Phase C1 plume
  * Cellular flame (hull-scaled, altitude plume), dithered opaque smoke, long t² flight
  * with accelerating follow cam, altitude sky + parallax clouds / streaking stars.
  * Timing: T-5 countdown, T-2 ignition, 0.5s hold, t² climb + zoom-out, mid-air handoff (no exit fly-off).
  * gp1-beta seam v6b5: zoom to TRUE play rocket screen height; full lb by handoff;
  * linger; pad plume held/morphed 0.5–0.6s + scenery crossfade across reveal; no HUD/earth pop.
+ * Phase C1: PSP multi-layer plume (white→orange→red) + ignition flash + smoke shear + tower warm kiss.
  */
 (function (global) {
   "use strict";
 
-  const BUILD = "gp1s3";
+  const BUILD = "gp1c1";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
   const CLIMB_DUR = 2.45;  // v6: hand off ~2.31–2.45 into play (was 4.2; kills vanish/snap dead air)
@@ -168,6 +169,9 @@
     this._tipLocal0 = null;
     this.flameIntensity = 0;
     this.releaseFlash = 0;
+    this._shearT = 0;       // C1: ignition smoke-shear window (seconds remaining)
+    this._ignFlash = 0;     // C1: nozzle ignition flash strength
+    this._towerKiss = null; // C1: cached native tower-face pixels for warm kiss
     this.perf.length = 0;
     this._fxReady = false;
     this._shakeX = 0;
@@ -1063,20 +1067,43 @@
     const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
     const cx = seat.cx;
     const trenchW = Math.max(40, (seat.width || 100) * 1.1);
-    this._smokeAcc += 38 * intensity * (this._lastDt || 1 / 60);
+    const shear = this._shearT > 0 ? clamp(this._shearT / 0.7, 0, 1) : 0; // C1 smoke shear
+    this._smokeAcc += (38 + 55 * shear) * intensity * (this._lastDt || 1 / 60);
     let n = Math.floor(this._smokeAcc);
     this._smokeAcc -= n;
-    if (n > 6) n = 6;
+    if (n > (shear > 0.2 ? 10 : 6)) n = shear > 0.2 ? 10 : 6;
     for (let i = 0; i < n; i++) {
       const dir = this._rand() < 0.5 ? -1 : 1;
+      const spd = (25 + this._rand() * 95) * (0.6 + 0.5 * intensity) * (1 + 1.6 * shear);
       this.spawn(
         this.ground,
-        cx + (this._rand() - 0.5) * trenchW,
+        cx + (this._rand() - 0.5) * trenchW * (1 + 0.4 * shear),
         deckY - 6 + (this._rand() - 0.25) * 30,
-        dir * (25 + this._rand() * 95) * (0.6 + 0.5 * intensity),
-        -6 - this._rand() * 18,
+        dir * spd,
+        -6 - this._rand() * 18 - shear * this._rand() * 12,
         1.8 + this._rand() * 2.4,
-        22 + this._rand() * 18,
+        22 + this._rand() * 18 + shear * 10,
+        (this._rand() * 4) | 0,
+        0
+      );
+    }
+  };
+
+  // C1: one-shot lateral smoke burst at ignition (reads as shear away from trench)
+  LiftoffEngine.prototype.emitIgnitionShear = function (seat) {
+    const deckY = seat.smokeY != null ? seat.smokeY : (seat.deckY != null ? seat.deckY : seat.sitY);
+    const cx = seat.cx;
+    const trenchW = Math.max(40, (seat.width || 100) * 1.1);
+    for (let i = 0; i < 28; i++) {
+      const dir = i & 1 ? -1 : 1;
+      this.spawn(
+        this.ground,
+        cx + dir * (trenchW * 0.15 + this._rand() * trenchW * 0.55),
+        deckY - 4 + (this._rand() - 0.3) * 24,
+        dir * (90 + this._rand() * 140),
+        -4 - this._rand() * 22,
+        1.2 + this._rand() * 1.6,
+        18 + this._rand() * 22,
         (this._rand() * 4) | 0,
         0
       );
@@ -1404,6 +1431,8 @@
     if (this.ignited) {
       ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0); // flame computed in screen px
       this.drawFlameDisplay(ctx, seat, pal);
+      this.drawIgnitionFlash(ctx, seat, pal);
+      this.drawTowerWarmKiss(ctx, seat, pal);
       ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     }
   };
@@ -1516,8 +1545,9 @@
     const dayTail = pal && pal.parallax === "day";
     if (dayTail && !this._fireRampDay) {
       const ramp = [];
-      const stops = [[255, 120, 36], [255, 132, 40], [255, 146, 42], [255, 160, 44], [255, 176, 52],
-        [255, 196, 64], [255, 218, 90], [255, 238, 150], [255, 250, 212]];
+      // C1 PSP bands (day): orange body stays opaque; white core + red rim still read at scale
+      const stops = [[255, 100, 28], [255, 120, 32], [255, 150, 36], [255, 180, 40], [255, 200, 56],
+        [255, 220, 90], [255, 240, 150], [255, 250, 200], [255, 255, 230]];
       for (let i = 0; i <= 36; i++) {
         const seg = (i / 36) * (stops.length - 1);
         const i0 = Math.min(stops.length - 2, seg | 0), f = seg - i0;
@@ -1528,13 +1558,17 @@
     }
     if (!this._fireRamp) {
       const ramp = [];
-      const stops = [[0, 0, 0], [40, 8, 0], [120, 20, 0], [200, 40, 0], [255, 90, 10],
-        [255, 160, 30], [255, 214, 76], [255, 238, 150], [255, 250, 212]];
+      // C1 PSP bands matching _fx/plume-up: deep red → hot orange → white core (hard steps)
+      const stops = [[0, 0, 0], [180, 40, 20], [180, 40, 20], [255, 90, 20], [255, 90, 20],
+        [255, 180, 40], [255, 180, 40], [255, 255, 180], [255, 255, 230]];
       for (let i = 0; i <= 36; i++) {
+        // Hard band pick (PSP-sharp): only 25% ease at band edges — no soft gaussian bloom
         const seg = (i / 36) * (stops.length - 1);
-        const i0 = Math.min(stops.length - 2, seg | 0), f = seg - i0;
-        const c = mix3(stops[i0], stops[i0 + 1], f);
-        const a = i < 3 ? 0 : Math.min(255, Math.round(18 + (i - 3) * 11));
+        const i0 = Math.min(stops.length - 2, seg | 0);
+        const f = seg - i0;
+        const c = f < 0.25 ? mix3(stops[i0], stops[i0 + 1], f / 0.25 * 0.35)
+          : (f > 0.75 ? mix3(stops[i0], stops[i0 + 1], 0.65 + (f - 0.75) / 0.25 * 0.35) : stops[i0 + (f >= 0.5 ? 1 : 0)]);
+        const a = i < 2 ? 0 : 255;
         ramp.push([c[0] | 0, c[1] | 0, c[2] | 0, a]);
       }
       this._fireRamp = ramp;
@@ -1690,6 +1724,132 @@
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
   };
+
+  // C1: bright white/cream ignition oval at nozzle (PSP-sharp — no soft bloom)
+  LiftoffEngine.prototype.drawIgnitionFlash = function (ctx, seat, pal) {
+    const flash = Math.max(this._ignFlash || 0, (this.releaseFlash || 0) * 0.85);
+    if (flash < 0.04 || !this._lb) return;
+    const lb = this._lb;
+    const nz = this.nozzleNative(seat);
+    const nozzles = seat.nozzles && seat.nozzles.length ? seat.nozzles : [0];
+    const zf = this._zoom || 1;
+    const stageW = Math.max(80, seat.width || 120);
+    const hullW = Math.max(18, Math.round(zf * (this._hullWcss || ((stageW / lb.nw) * lb.width * 0.76))));
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = "lighter";
+    for (let ni = 0; ni < nozzles.length; ni++) {
+      const isSide = ni > 0;
+      const sc = seat.nozzleScales ? seat.nozzleScales[ni] : (isSide ? 0.42 : 1);
+      const ndy = seat.nozzleDy && seat.nozzleDy[ni] ? seat.nozzleDy[ni] : 0;
+      const cw0 = this.cssFromNative(nz.x + nozzles[ni], nz.y + ndy);
+      const css = this._w2s(cw0.x, cw0.y);
+      const rx = Math.max(3, Math.round(hullW * (isSide ? 0.28 : 0.48) * sc * (0.75 + 0.55 * flash)));
+      const ry = Math.max(2, Math.round(rx * 0.38));
+      const cx = Math.round(css.x), cy = Math.round(css.y + 1);
+      for (let dy = -ry; dy <= ry; dy++) {
+        const t = 1 - (dy * dy) / (ry * ry + 0.01);
+        const span = Math.round(rx * Math.sqrt(Math.max(0, t)));
+        if (span <= 0) continue;
+        // outer pale rim
+        ctx.globalAlpha = flash * 0.55 * t;
+        ctx.fillStyle = "#ffe8a0";
+        ctx.fillRect(cx - span, cy + dy, span * 2 + 1, 1);
+        // white core (tighter)
+        const span2 = Math.max(1, Math.round(span * 0.55));
+        ctx.globalAlpha = flash * 0.95 * t;
+        ctx.fillStyle = "#fffef0";
+        ctx.fillRect(cx - span2, cy + dy, span2 * 2 + 1, 1);
+      }
+      // sparse spark pixels (PSP grit, not bloom)
+      for (let k = 0; k < 6; k++) {
+        if (this._rand() > flash) continue;
+        const ang = this._rand() * Math.PI * 2;
+        const rad = rx * (0.7 + this._rand() * 0.9);
+        ctx.globalAlpha = flash * 0.7;
+        ctx.fillStyle = this._rand() < 0.5 ? "#ffffff" : "#ffd070";
+        ctx.fillRect(cx + Math.round(Math.cos(ang) * rad), cy + Math.round(Math.sin(ang) * rad * 0.45), 1, 1);
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  };
+
+  // C1: warm orange light-kiss on tower face toward the plume (silhouette unchanged)
+  LiftoffEngine.prototype._ensureTowerKiss = function (seat) {
+    if (this._towerKiss && this._towerKiss.tod === this.getTodId()) return this._towerKiss;
+    const plate = this.getPlateEl && this.getPlateEl();
+    const pts = [];
+    let tod = this.getTodId();
+    try {
+      if (plate && plate.naturalWidth) {
+        const nw = plate.naturalWidth, nh = plate.naturalHeight;
+        const c = document.createElement("canvas");
+        c.width = nw; c.height = nh;
+        const g = c.getContext("2d", { willReadFrequently: true });
+        g.drawImage(plate, 0, 0);
+        const d = g.getImageData(0, 0, nw, nh).data;
+        const cx = seat.cx != null ? seat.cx : nw * 0.55;
+        const sitY = seat.sitY != null ? seat.sitY : nh * 0.76;
+        const x1 = Math.floor(cx - (seat.width || 100) * 0.35);
+        const x0 = Math.max(0, Math.floor(cx - (seat.width || 100) * 2.4));
+        const y0 = Math.max(0, Math.floor(sitY - (seat.stackH || seat.targetH || 480) * 1.05));
+        const y1 = Math.min(nh - 1, Math.floor(sitY - 8));
+        // Keep only right-facing structure columns (near rocket) with low-chroma dark metal
+        for (let y = y0; y <= y1; y += 2) {
+          for (let x = x0; x <= x1; x += 2) {
+            const i = (y * nw + x) * 4;
+            const r = d[i], gv = d[i + 1], b = d[i + 2], a = d[i + 3];
+            if (a < 200) continue;
+            const mx = Math.max(r, gv, b), mn = Math.min(r, gv, b);
+            if (mx - mn > 28) continue; // skip sky / blue nav lights / painted chroma
+            if (mx < 22 || mx > 110) continue;
+            // prefer columns closer to rocket (face)
+            const face = 1 - (x1 - x) / Math.max(1, x1 - x0);
+            if (face < 0.35 && this._rand() > 0.15) continue;
+            if (((x * 17 + y * 31) & 7) > 3 + (face * 3) | 0) continue; // dither density
+            pts.push(x, y);
+          }
+        }
+      }
+    } catch (_) {}
+    this._towerKiss = { tod: tod, pts: pts };
+    return this._towerKiss;
+  };
+
+  LiftoffEngine.prototype.drawTowerWarmKiss = function (ctx, seat, pal) {
+    if (!this.ignited || !this._lb || this.flameIntensity < 0.08) return;
+    const riseCss = this.rocketY * (this._lb.height / this._lb.nh);
+    const near = clamp(1 - riseCss / 160, 0, 1);
+    const str = clamp(this.flameIntensity, 0, 1.4) * near * (0.55 + 0.7 * (this._ignFlash || 0) + 0.35 * (this.releaseFlash || 0));
+    if (str < 0.05) return;
+    const kiss = this._ensureTowerKiss(seat);
+    const pts = kiss.pts;
+    if (!pts || pts.length < 8) return;
+    const flick = 0.75 + 0.25 * Math.sin(this._simTime * 37.0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = "lighter";
+    const warm = pal && pal.smokeLit && pal.smokeLit[0] ? pal.smokeLit[0] : "#ffb070";
+    const hot = "#ffe0a0";
+    for (let i = 0; i < pts.length; i += 2) {
+      const cw = this.cssFromNative(pts[i], pts[i + 1]);
+      const s = this._w2s(cw.x, cw.y);
+      const x = Math.round(s.x), y = Math.round(s.y);
+      if (x < -2 || y < -2 || x > this._wrapW + 2 || y > this._wrapH + 2) continue;
+      const h = (pts[i] * 13 + pts[i + 1] * 7 + ((this._simTime * 20) | 0)) & 7;
+      if (h > 5 + str * 2) continue;
+      ctx.globalAlpha = str * flick * (h < 3 ? 0.55 : 0.28);
+      ctx.fillStyle = h < 2 ? hot : warm;
+      ctx.fillRect(x, y, 1, 1);
+      if (h < 2 && str > 0.45) ctx.fillRect(x + 1, y, 1, 1);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  };
+
 
   LiftoffEngine.prototype.applyRocketLight = function () {
     const stack = this.getStackEl();
@@ -2270,6 +2430,13 @@
     } catch (_) {}
 
     if (this.releaseFlash > 0) this.releaseFlash = Math.max(0, this.releaseFlash - dt / 0.18);
+    if (this._shearT > 0) this._shearT = Math.max(0, this._shearT - dt);
+    if (this._ignFlash > 0) {
+      // hold bright through burn, then ease; releaseFlash retriggers a kick
+      const target = this.phase === "burn" ? 0.7 : (this.phase === "hold" ? 0.55 : 0.22);
+      this._ignFlash = Math.max(this.releaseFlash * 0.9, lerp(this._ignFlash, target, 0.08));
+      if (this.phase === "climb" && this.climbT > 1.2) this._ignFlash = Math.max(0, this._ignFlash - dt * 0.35);
+    }
 
     if (elapsed < 5) {
       this.phase = "countdown";
@@ -2278,6 +2445,9 @@
         this.shake = 5;
         this.vibrate([50, 30, 50]);
         this.setAudioLevel(0.28);
+        this._shearT = 0.85;   // C1 smoke shear window
+        this._ignFlash = 1.0;  // C1 ignition flash
+        this.emitIgnitionShear(seat);
       }
       if (this.ignited) {
         this.phase = "burn";
@@ -2293,6 +2463,9 @@
         this.climbT = 0;
         this.shake = 11;
         this.releaseFlash = 1;
+        this._ignFlash = Math.max(this._ignFlash, 1);
+        this._shearT = Math.max(this._shearT, 0.55);
+        this.emitIgnitionShear(seat);
         this.vibrate([90, 40, 70, 40, 90]);
         this.setAudioLevel(0.52);
       }

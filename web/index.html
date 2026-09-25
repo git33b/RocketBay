@@ -475,7 +475,7 @@
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=gp1-beta-s6b5c"></script>
   <script src="audio.js?v=gp1-beta-s6b5c"></script>
-  <script src="liftoff.js?v=gp1-beta-s6b5c"></script>
+  <script src="liftoff.js?v=gp1-beta-c1"></script>
   <script src="flight.js?v=gp1-beta-b2"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
@@ -484,7 +484,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-b2";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-c1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
     // Phase B1: PART-STATS → ATTRS (Weight←mass, Speed←thrust, Agility←stability/agility)
