@@ -1,4 +1,4 @@
-/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
+/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-c3 BH polish
  * GP1-BETA C2: cruise longer dual-layer exhaust + ~10° nose-up while thrusting (flight gameplay).
  * GP1-BETA s6b5: plume hold/morph + scenery crossfade across reveal; keep scale/lb/no-second-climb, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
@@ -1453,6 +1453,11 @@
             x.beginPath(); x.arc(0, 0, Math.max(28, h.dw * 0.42), 0, Math.PI * 2); x.stroke();
           }
           x.restore();
+          // gp1-c3: world-aligned inbound pull dashes when not already in soft-R VFX
+          if (h.kind === 3 && !this.crashed && !this._bhInPull) {
+            const reach = Math.max(h.dw * 0.95, h.r * 3.2);
+            this._drawBhPullStreaks(x, sx, h.y, h.r, reach, this.px, this.py, 0.45);
+          }
         } else {
           if (deadly) {
             x.save();
@@ -1537,8 +1542,13 @@
       if (this._bhInPull && !this.crashed) this._drawBhPullVfx(x, VW);
       // crash dim
       if (this.crashed && this.deathKind === "swallow") {
-        // mild vignette as we fall in — no explosion dim
+        // mild vignette as we fall in — no explosion dim; suck-in streaks into core
         const u = clamp(this.crashT / BH_SWALLOW_S, 0, 1);
+        const bh = this.swallowBh;
+        if (bh && bh.on) {
+          const hx = bh.x - this.cam * (bh.par || 1), hy = bh.y;
+          this._drawBhPullStreaks(x, hx, hy, bh.r, Math.max(bh.dw, 120) * (1.1 - 0.5 * u), this.px, this.py, 0.7 + 0.3 * u);
+        }
         x.fillStyle = "rgba(10,0,20," + (0.18 + 0.55 * u * u).toFixed(3) + ")";
         x.fillRect(0, 0, VW, WORLD_H);
       } else if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
@@ -1671,6 +1681,47 @@
       }
     }
   };
+  // gp1-c3: inbound purple pull-dust streaks (telegraph) — cosmetic; gravity stays bh1g
+  P._drawBhPullStreaks = function (x, hx, hy, coreR, reach, aimX, aimY, strength) {
+    const dx = aimX - hx, dy = aimY - hy;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+    const ang0 = Math.atan2(uy, ux);
+    const n = 7;
+    const tPulse = this.t * 2.4;
+    x.save();
+    for (let i = 0; i < n; i++) {
+      const fan = (i - (n - 1) / 2) * 0.11;
+      const a = ang0 + fan;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      // dash chain from outer reach inward toward core (readable telegraph)
+      const r0 = Math.max(coreR * 1.35, reach * 0.22);
+      const r1 = reach * (0.72 + 0.08 * Math.sin(tPulse + i));
+      const dashes = 5;
+      for (let d = 0; d < dashes; d++) {
+        const u0 = d / dashes, u1 = (d + 0.55) / dashes;
+        const ra = r1 + (r0 - r1) * u0;
+        const rb = r1 + (r0 - r1) * u1;
+        const alpha = (0.22 + 0.55 * strength) * (1 - u0 * 0.65) * (1 - Math.abs(fan) * 1.2);
+        if (alpha < 0.04) continue;
+        x.strokeStyle = i % 2 === 0
+          ? ("rgba(180,120,255," + alpha.toFixed(3) + ")")
+          : ("rgba(120,160,255," + (alpha * 0.85).toFixed(3) + ")");
+        x.lineWidth = 1.5 + (1 - u0) * 1.2 * strength;
+        x.beginPath();
+        x.moveTo(hx + ca * ra, hy + sa * ra);
+        x.lineTo(hx + ca * rb, hy + sa * rb);
+        x.stroke();
+      }
+      // dust mote near mid-streak
+      const rm = (r0 + r1) * 0.5;
+      const mx = hx + ca * rm + Math.sin(tPulse * 1.7 + i) * 3;
+      const my = hy + sa * rm + Math.cos(tPulse * 1.3 + i) * 2;
+      x.fillStyle = "rgba(200,160,255," + (0.35 * strength).toFixed(3) + ")";
+      x.fillRect(Math.round(mx) - 1, Math.round(my) - 1, 2, 2);
+    }
+    x.restore();
+  };
   P._drawBhPullVfx = function (x, VW) {
     // Find nearest BH for localized swirl (soft-R). Dark vignette + purple/blue — never dirt wash.
     let best = null, bestD = 1e9;
@@ -1694,6 +1745,9 @@
     g.addColorStop(1, "rgba(10, 20, 50, 0.0)");
     x.fillStyle = g;
     x.beginPath(); x.arc(hx, hy, pr, 0, Math.PI * 2); x.fill();
+    // inbound pull-dust streaks (telegraph toward rocket) — gp1-c3
+    const str = Math.max(0.35, 1 - bestD / (pr + 80));
+    this._drawBhPullStreaks(x, hx, hy, best.r, Math.min(pr * 0.85, bestD + 40), this.px, this.py, str);
     // spinning arc cues (readable at phone size)
     x.save();
     x.translate(hx, hy);
