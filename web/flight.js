@@ -1313,10 +1313,11 @@
     }
     // Single rocket in seam camera space — scale tracks camZoom continuously (still inside play clip)
     const seamHoldFlame = this.phase === "settle" && this._seamSuppressFlame;
-    const thrusting = !seamHoldFlame && (this.phase === "climb" || this.phase === "pitch" || (this.phase === "settle" && this.phaseT < SETTLE_T * 0.55));
+    // v6b: keep settle plume on after pad FX releases (full settle, not only first 55%)
+    const thrusting = !seamHoldFlame && (this.phase === "climb" || this.phase === "pitch" || this.phase === "settle");
     const plume = seamHoldFlame ? 0
       : this.phase === "climb" ? CLIMB_PLUME
-      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.40 * clamp(this.phaseT / SETTLE_T, 0, 1)))
+      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.35 * clamp(this.phaseT / SETTLE_T, 0, 1)))
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
     const sh = this._climbShake || 0;
     const rx = this.px + (sh ? Math.sin(this.t * 47) * sh : 0);

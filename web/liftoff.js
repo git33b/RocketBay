@@ -1576,10 +1576,11 @@
     // (screen px) flame is simulated/rendered at the zoomed size -> 1 cell = 1 screen px
     const hullW = Math.max(18, Math.round(zf * (this._hullWcss || ((stageW / lb.nw) * lb.width * 0.76))));
     const grow = clamp(this.flameIntensity, 0.2, 1.5);
+    // v6b linger: keep full late-climb plume (u=1) so pad FX doesn't die at play-scale join
     const u = this.phase === "climb" ? smooth01(0, 5, this.climbT)
-      : (this.phase === "exit" ? 1 : 0);
+      : (this.phase === "exit" || this.phase === "linger" ? 1 : 0);
     let lenRatio;
-    if (this.phase === "climb" || this.phase === "exit") lenRatio = 1.9 + 1.1 * u;
+    if (this.phase === "climb" || this.phase === "exit" || this.phase === "linger") lenRatio = 1.9 + 1.1 * u;
     else if (this.phase === "hold") lenRatio = 1.8;
     else lenRatio = 0.8 + 1.0 * clamp((grow - 0.2) / 1.0, 0, 1);
     // Length flicker (not only edges): layered fast oscillation + noise
@@ -1592,7 +1593,7 @@
     const visRows = Math.max(8, Math.ceil(wrapH - nozzleScreenY + 4));
     // Plume may run off the bottom edge during follow (camera frames the whole rocket)
     let lenBase = hullW * lenRatio;
-    if (this.phase === "climb" || this.phase === "exit") {
+    if (this.phase === "climb" || this.phase === "exit" || this.phase === "linger") {
       const rocketCss = (seat.stackH || seat.targetH || 480) * (lb.height / lb.nh) * zf;
       const land = (this._wrapW || 844) > wrapH;
       if (land) {
@@ -2360,7 +2361,11 @@
           try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "linger", finished: true, running: true, handoff: handoff }); } catch (_) {}
           if (this.onPerfSample) this.onPerfSample(this.perf.slice());
           this.onComplete(handoff);
-          // fall through — same tick still draws FX; subsequent ticks run linger
+          // Draw THIS tick so join frame keeps plume (prior comment lied about fall-through)
+          this.updateParticles(dt);
+          this.applyTransforms(seat);
+          this.drawFx(seat);
+          this.drawAltSky(dt);
           return;
         }
       }
