@@ -40,7 +40,7 @@
   const BH_SOFT = 3200;                  // softens singularity near core
   const BH_OTHER = 0.32;                 // other deadly haz/meteors ~0.25–0.4× player; rises with BH_G
   const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
-  const BH_SWALLOW_S = 0.55;             // suck-in duration before result (0.4–0.7s band)
+  const BH_SWALLOW_S = 0.55;             // suck-in: spin+shrink into core, then result (0.4–0.7s; no boom/debris)
   const BH_MIN_KM = 95;                  // L1 rare/absent until ~this depth (or phaseT gate)
   const BH_GAP0 = 26, BH_GAP1 = 12;      // seconds between BH spawns (L1 → deep)
   const SIM_DT = 1 / 120;
@@ -451,8 +451,10 @@
         const e = u * u * (3 - 2 * u); // smoothstep
         this.px = this.swallowPx + (hx - this.swallowPx) * e;
         this.py = this.swallowPy + (hy - this.swallowPy) * e;
-        this.tilt = this.swallowTilt + u * 5.2; // spiral into core
-        this.swallowScale = 1 - 0.94 * e;
+        // Visible suck-in spin: ~2.75 turns, accelerates as it shrinks (Ateeb clarify)
+        const spin = u * u * (Math.PI * 2 * 2.75);
+        this.tilt = this.swallowTilt + spin;
+        this.swallowScale = 1 - 0.96 * e; // shrink to nearly gone — no debris pop
         this.speed = Math.max(0, this.speed * (1 - clamp(this.crashT / 0.35, 0, 1)));
         this.cam += this.speed * dt; this.dist = this.cam;
         // keep BH spinning during suck-in
@@ -1175,6 +1177,7 @@
       }
       this._drawRocket(x, this.px, this.py, this.tilt, 1, (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
     } else if (this.deathKind === "swallow") {
+      // Spinning shrink into core — rocket only, no crash frames / debris / boom art
       if (this.swallowScale > 0.04) {
         x.save();
         x.translate(this.px, this.py);
