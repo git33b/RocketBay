@@ -1,0 +1,258 @@
+{
+  "version": 1,
+  "note": "Assemble ATTRS HUD \u2014 Weight\u2190mass, Speed\u2190thrust, Agility\u2190agility (Stability). Stack rollup live.",
+  "parts": {
+    "moon-giant-s1": {
+      "displayName": "Moon Giant",
+      "role": "first_stage",
+      "mass": 1.85,
+      "thrust": 2.6,
+      "agility": 0.55,
+      "bars": {
+        "weight": 0.925,
+        "speed": 1.0,
+        "agility": 0.393
+      }
+    },
+    "pencil-core-s1": {
+      "displayName": "Pencil Core",
+      "role": "first_stage",
+      "mass": 0.55,
+      "thrust": 0.7,
+      "agility": 1.35,
+      "bars": {
+        "weight": 0.275,
+        "speed": 0.318,
+        "agility": 0.964
+      }
+    },
+    "gridfin-booster-s1": {
+      "displayName": "Gridfin Booster",
+      "role": "first_stage",
+      "mass": 0.8,
+      "thrust": 0.95,
+      "agility": 1.0,
+      "bars": {
+        "weight": 0.4,
+        "speed": 0.432,
+        "agility": 0.714
+      }
+    },
+    "euro-core-s1": {
+      "displayName": "Euro Core",
+      "role": "first_stage",
+      "mass": 0.95,
+      "thrust": 1.05,
+      "agility": 0.9,
+      "bars": {
+        "weight": 0.475,
+        "speed": 0.477,
+        "agility": 0.643
+      }
+    },
+    "orange-tank-core": {
+      "displayName": "Orange Tank",
+      "role": "first_stage",
+      "mass": 1.7,
+      "thrust": 2.1,
+      "agility": 0.6,
+      "bars": {
+        "weight": 0.85,
+        "speed": 0.955,
+        "agility": 0.429
+      }
+    },
+    "orange-tank-core-bare": {
+      "displayName": "Orange Tank Bare",
+      "role": "first_stage",
+      "mass": 1.6,
+      "thrust": 2.05,
+      "agility": 0.62,
+      "bars": {
+        "weight": 0.8,
+        "speed": 0.932,
+        "agility": 0.443
+      }
+    },
+    "steel-booster": {
+      "displayName": "Steel Booster",
+      "role": "first_stage",
+      "mass": 1.35,
+      "thrust": 2.0,
+      "agility": 0.78,
+      "bars": {
+        "weight": 0.675,
+        "speed": 0.909,
+        "agility": 0.557
+      }
+    },
+    "moon-giant-upper": {
+      "displayName": "Moon Giant Upper",
+      "role": "upper",
+      "mass": 0.7,
+      "thrust": 0.35,
+      "agility": 0.7,
+      "bars": {
+        "weight": 0.35,
+        "speed": 0.159,
+        "agility": 0.5
+      }
+    },
+    "pencil-upper": {
+      "displayName": "Pencil Upper",
+      "role": "upper",
+      "mass": 0.25,
+      "thrust": 0.22,
+      "agility": 1.2,
+      "bars": {
+        "weight": 0.125,
+        "speed": 0.1,
+        "agility": 0.857
+      }
+    },
+    "gridfin-upper": {
+      "displayName": "Gridfin Upper",
+      "role": "upper",
+      "mass": 0.32,
+      "thrust": 0.3,
+      "agility": 1.0,
+      "bars": {
+        "weight": 0.16,
+        "speed": 0.136,
+        "agility": 0.714
+      }
+    },
+    "euro-upper": {
+      "displayName": "Euro Upper",
+      "role": "upper",
+      "mass": 0.4,
+      "thrust": 0.28,
+      "agility": 0.9,
+      "bars": {
+        "weight": 0.2,
+        "speed": 0.127,
+        "agility": 0.643
+      }
+    },
+    "orange-upper": {
+      "displayName": "Orange Upper",
+      "role": "upper",
+      "mass": 0.55,
+      "thrust": 0.32,
+      "agility": 0.75,
+      "bars": {
+        "weight": 0.275,
+        "speed": 0.145,
+        "agility": 0.536
+      }
+    },
+    "steel-ship": {
+      "displayName": "Steel Ship",
+      "role": "upper",
+      "mass": 0.9,
+      "thrust": 0.7,
+      "agility": 0.8,
+      "bars": {
+        "weight": 0.45,
+        "speed": 0.318,
+        "agility": 0.571
+      }
+    },
+    "escape-cone": {
+      "displayName": "Escape Cone",
+      "role": "payload",
+      "mass": 0.22,
+      "thrust": 0.0,
+      "agility": 0.95,
+      "bars": {
+        "weight": 0.11,
+        "speed": 0.05,
+        "agility": 0.679
+      }
+    },
+    "pencil-fairing": {
+      "displayName": "Pencil Fairing",
+      "role": "payload",
+      "mass": 0.15,
+      "thrust": 0.0,
+      "agility": 1.1,
+      "bars": {
+        "weight": 0.075,
+        "speed": 0.05,
+        "agility": 0.786
+      }
+    },
+    "gridfin-fairing": {
+      "displayName": "Gridfin Fairing",
+      "role": "payload",
+      "mass": 0.18,
+      "thrust": 0.0,
+      "agility": 1.0,
+      "bars": {
+        "weight": 0.09,
+        "speed": 0.05,
+        "agility": 0.714
+      }
+    },
+    "euro-fairing": {
+      "displayName": "Euro Fairing",
+      "role": "payload",
+      "mass": 0.28,
+      "thrust": 0.0,
+      "agility": 0.85,
+      "bars": {
+        "weight": 0.14,
+        "speed": 0.05,
+        "agility": 0.607
+      }
+    },
+    "moon-giant-fairing": {
+      "displayName": "Moon Giant Fairing",
+      "role": "payload",
+      "mass": 0.35,
+      "thrust": 0.0,
+      "agility": 0.75,
+      "bars": {
+        "weight": 0.175,
+        "speed": 0.05,
+        "agility": 0.536
+      }
+    },
+    "orange-fairing": {
+      "displayName": "Orange Fairing",
+      "role": "payload",
+      "mass": 0.32,
+      "thrust": 0.0,
+      "agility": 0.8,
+      "bars": {
+        "weight": 0.16,
+        "speed": 0.05,
+        "agility": 0.571
+      }
+    },
+    "side-booster-left": {
+      "displayName": "Side Booster Left",
+      "role": "side_booster",
+      "mass": 0.42,
+      "thrust": 0.75,
+      "agility": 0.9,
+      "bars": {
+        "weight": 0.21,
+        "speed": 0.341,
+        "agility": 0.643
+      }
+    },
+    "side-booster-right": {
+      "displayName": "Side Booster Right",
+      "role": "side_booster",
+      "mass": 0.42,
+      "thrust": 0.75,
+      "agility": 0.9,
+      "bars": {
+        "weight": 0.21,
+        "speed": 0.341,
+        "agility": 0.643
+      }
+    }
+  }
+}

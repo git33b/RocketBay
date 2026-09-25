@@ -184,7 +184,15 @@
     #reason.warn { color: #ffb4a6; }
     #reason.ok { color: #9dfcc0; }
     #actRow button { padding: 9px 10px; }
-    #launchBtn { min-width: 128px; }
+    #actRow { gap: 8px; align-items: stretch; }
+    #launchBtn {
+      min-width: 152px; padding: 8px 16px 7px; line-height: 1.05;
+      display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+      background: #ff8c14; box-shadow: 0 0 0 1px rgba(255,210,100,.55), 0 2px 12px rgba(255,100,0,.4);
+    }
+    #launchBtn .goMain { font-size: 22px; font-weight: 900; letter-spacing: .05em; }
+    #launchBtn .goSub { font-size: 9px; font-weight: 800; letter-spacing: .08em; opacity: .95; }
+    #launchBtn:disabled { box-shadow: none; }
     #todRow button { min-width: 0; padding: 6px 8px; font-size: 10px; }
     #world.assembleZoom { transition: transform .45s ease; }
     @media (orientation: landscape) and (max-height: 560px) {
@@ -208,11 +216,53 @@
     .op.done { background: rgba(40,180,90,.35); border-color: rgba(80,220,120,.5); }
     .op.run { background: rgba(255,140,0,.35); border-color: var(--accent); }
     #meta { text-align: center; font-size: 10px; opacity: .8; letter-spacing: .03em; }
-    #soundBtn { min-width: 84px; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; }
-    #soundBtn .spk { width: 15px; height: 15px; flex: 0 0 auto; }
+    /* Phase B1: icon-only Sound ≤56px (no text pill) */
+    #soundBtn {
+      min-width: 0; width: 48px; max-width: 56px; height: 42px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center; white-space: nowrap;
+    }
+    #soundBtn .spk { width: 22px; height: 22px; flex: 0 0 auto; }
+    #soundBtn .lbl { display: none; }
     #soundBtn .x { display: none; } #soundBtn:not(.on) .waves { display: none; } #soundBtn:not(.on) .x { display: inline; }
     #soundBtn:not(.on) { opacity: .85; }
     #soundBtn.on { background: rgba(0,180,220,.55); }
+    /* Phase B1: collapse verbose status line; keep warn flashes */
+    #reason:empty { height: 0; min-height: 0; margin: 0; padding: 0; overflow: hidden; }
+    /* Phase B1: ATTRS HUD Layout B-tall edge-float (sky-right) */
+    #attrsHud {
+      position: fixed; z-index: 42; display: none; flex-direction: column; gap: 8px;
+      right: calc(10px + env(safe-area-inset-right));
+      top: calc(40px + env(safe-area-inset-top));
+      width: clamp(118px, 32vw, 168px);
+      padding: 10px 10px 8px;
+      background: rgba(12,18,22,.78);
+      border: 1px solid rgba(61,255,122,.35);
+      border-radius: 8px;
+      color: #e8fff0;
+      font: 700 11px/1.15 "DejaVu Sans", Verdana, system-ui, sans-serif;
+      pointer-events: none;
+      box-shadow: 0 4px 18px rgba(0,0,0,.45);
+    }
+    #attrsHud.on { display: flex; }
+    #attrsHud .attrsTitle { font-size: 12px; letter-spacing: .06em; color: #fff; }
+    #attrsHud .attrsTitle span { color: #3DFF7A; }
+    #attrsHud .attrsRow { display: flex; flex-direction: column; gap: 3px; }
+    #attrsHud .attrsLab { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+    #attrsHud .attrsLab span { font-size: 10px; letter-spacing: .04em; color: #dce8e0; }
+    #attrsHud .attrsLab b { font-size: 12px; color: #3DFF7A; font-variant-numeric: tabular-nums; }
+    #attrsHud .attrsTrack {
+      display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; height: 10px;
+    }
+    #attrsHud .attrsTrack i {
+      display: block; height: 100%; border-radius: 1px;
+      background: rgba(61,255,122,.18);
+    }
+    #attrsHud .attrsTrack i.on { background: #3DFF7A; }
+    #attrsHud .attrsCap { font-size: 9px; font-weight: 600; color: rgba(200,210,205,.55); margin-top: 2px; }
+    @media (orientation: landscape) and (max-height: 560px) {
+      #attrsHud { right: calc(328px + env(safe-area-inset-right)); top: calc(10px + env(safe-area-inset-top)); width: min(140px, 22vw); }
+    }
+    body.bh-lab #attrsHud { display: none !important; }
     #launchBtn.holding { background: rgba(255,80,0,.95); transform: scale(0.98); }
     #ops .op.big { font-size: 12px; padding: 8px 14px; }
     /* friend-trial: first-screen hint + feedback */
@@ -349,6 +399,13 @@
   <div id="buildLabel" aria-hidden="true"></div>
   <div id="firstHint" role="note"><span class="txt">Build your rocket from the parts <span id="hintWhere">below</span>, then tap <b>GO FOR LAUNCH</b>.</span><button type="button" id="hintOk">GOT IT</button></div>
   <button type="button" id="fbBtn" aria-haspopup="dialog">Feedback</button>
+  <aside id="attrsHud" aria-label="Stack attributes" aria-live="polite">
+    <div class="attrsTitle">ATTRS <span>· BETA</span></div>
+    <div class="attrsRow" data-k="weight"><div class="attrsLab"><span>WEIGHT</span><b>0</b></div><div class="attrsTrack" aria-hidden="true"></div></div>
+    <div class="attrsRow" data-k="speed"><div class="attrsLab"><span>SPEED</span><b>0</b></div><div class="attrsTrack" aria-hidden="true"></div></div>
+    <div class="attrsRow" data-k="agility"><div class="attrsLab"><span>AGILITY</span><b>0</b></div><div class="attrsTrack" aria-hidden="true"></div></div>
+    <div class="attrsCap">Empty pad</div>
+  </aside>
   <div id="fbModal" role="dialog" aria-modal="true" aria-labelledby="fbTitle">
     <div id="fbCard">
       <h2 id="fbTitle">Send feedback</h2>
@@ -376,7 +433,7 @@
         <button type="button" class="ghost" id="undoBtn">UNDO</button>
         <button type="button" class="ghost" id="clearBtn">CLEAR</button>
         <button type="button" class="ghost on" id="soundBtn" aria-pressed="true" aria-label="Sound: On"><svg class="spk" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><g class="waves" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 9.5a4 4 0 0 1 0 5"/><path d="M18.5 7a7.5 7.5 0 0 1 0 10"/></g><g class="x" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 9l5 6M21 9l-5 6"/></g></svg><span class="lbl">Sound: On</span></button>
-        <button type="button" class="primary" id="launchBtn" disabled>GO FOR LAUNCH</button>
+        <button type="button" class="primary" id="launchBtn" disabled><span class="goMain">GO</span><span class="goSub">FOR LAUNCH</span></button>
       </div>
     </div>
 
@@ -424,9 +481,69 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6b5c";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-b1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
+    // Phase B1: PART-STATS → ATTRS (Weight←mass, Speed←thrust, Agility←stability/agility)
+    let PART_STATS = null;
+    const ATTRS_EQ = "#3DFF7A";
+    function clamp100(n) { return Math.max(0, Math.min(100, n | 0)); }
+    function stackAttrIds(b) {
+      const ids = idsOf(b).slice();
+      if (b && b.sides) { ids.push("side-booster-left", "side-booster-right"); }
+      return ids;
+    }
+    function stackCaption(b) {
+      if (!b || !b.s1) return "Empty pad";
+      const p = PART_STATS && PART_STATS[b.s1];
+      const fam = (p && p.displayName) || (M()[b.s1] && M()[b.s1].label) || nick(b.s1) || "Stack";
+      return fam.replace(/\b(Stage|Booster|Core|Fairing|Ship|Tank)\b/gi, "").replace(/\s+/g, " ").trim() + " stack";
+    }
+    /** Live 0–100 bars from stack mass/thrust/agility (PART-STATS). Scaled so Moon Giant ≈92/90/72 and Pencil ≈50/70/84. */
+    function computeStackAttrs(b) {
+      if (!PART_STATS || !b) return { weight: 0, speed: 0, agility: 0, caption: "Empty pad" };
+      const ids = stackAttrIds(b);
+      if (!ids.length) return { weight: 0, speed: 0, agility: 0, caption: "Empty pad" };
+      let mass = 0, thrust = 0, agMass = 0;
+      for (let i = 0; i < ids.length; i++) {
+        const p = PART_STATS[ids[i]];
+        if (!p) continue;
+        mass += p.mass; thrust += p.thrust; agMass += p.mass * p.agility;
+      }
+      const ag = mass > 0.001 ? agMass / mass : 0;
+      // Linear map fitted to research showcase stacks (see attrs-hud NOTES)
+      return {
+        weight: clamp100(Math.round(29.5 + 21.54 * mass)),
+        speed: clamp100(Math.round(61 + 9.85 * thrust)),
+        agility: clamp100(Math.round(61 + 18.18 * ag)),
+        caption: stackCaption(b),
+      };
+    }
+    function paintAttrsTrack(track, value) {
+      const n = Math.max(0, Math.min(10, Math.round(value / 10)));
+      if (track.childElementCount !== 10) {
+        track.innerHTML = "";
+        for (let i = 0; i < 10; i++) track.appendChild(document.createElement("i"));
+      }
+      const kids = track.children;
+      for (let i = 0; i < 10; i++) kids[i].classList.toggle("on", i < n);
+    }
+    function renderAttrsHud() {
+      const el = $("attrsHud");
+      if (!el) return;
+      const show = state.phase === "assemble" && !LAB;
+      el.classList.toggle("on", show);
+      if (!show) return;
+      const a = computeStackAttrs(state.build);
+      ["weight", "speed", "agility"].forEach((k) => {
+        const row = el.querySelector('.attrsRow[data-k="' + k + '"]');
+        if (!row) return;
+        row.querySelector("b").textContent = String(a[k]);
+        paintAttrsTrack(row.querySelector(".attrsTrack"), a[k]);
+      });
+      const cap = el.querySelector(".attrsCap");
+      if (cap) cap.textContent = a.caption;
+    }
 
     function padCfg(todId) {
       if (_padAPI.padFor) return _padAPI.padFor(todId);
@@ -753,9 +870,11 @@
         trayEl.appendChild(el);
       });
       requestAnimationFrame(updateTrayHint);
+      // Phase B1: no verbose status string (Steel/Moon Giant · ready); warn/swap only
       if (state.swapSlot) setReason(`Swap ${state.swapSlot === "sides" ? "side boosters" : lbl(state.build[state.swapSlot])}: pick a replacement`, "ok");
-      else setReason(summaryLine(), isComplete(b) ? "ok" : "");
+      else setReason("");
       $("undoBtn").disabled = !state.history.length;
+      renderAttrsHud();
     }
 
     /* ---------------- rocket composition + drop-in ---------------- */
@@ -1015,6 +1134,7 @@
       stackHud.textContent = KIT ? (idsOf(state.build).map(lbl).join(" + ") || "\u2014") : "";
       launchBtn.disabled = !(KIT && isComplete(state.build) && !validate(state.build, 0));
       plateWrap.classList.toggle("liftoffClimb", p === "liftoff" || fb);
+      renderAttrsHud();
     }
 
     function renderOps(activeIdx) {
@@ -1057,7 +1177,7 @@
       state.step = !b.s1 ? "s1" : !b.upper ? "upper" : isComplete(b) ? state.step : "payload";
       rebuildRocket(null);
       render();
-      setReason("Undo \u00b7 " + summaryLine(), "");
+      setReason(""); renderAttrsHud();
       void cur;
     };
 
@@ -1494,9 +1614,14 @@
 
     window.addEventListener("resize", () => { applyPlateMap(); if (state.phase !== "liftoff") { applyAssembleFrame(); paintStack(); } });
     render();
-    MB.loadKit("kit/modular/", KIT_VER).then((k) => {
+    const partStatsP = fetch("kit/modular/part-stats.json?v=" + APP_VER)
+      .then((r) => r.ok ? r.json() : null)
+      .then((j) => { PART_STATS = (j && j.parts) || null; window.__partStats = PART_STATS; })
+      .catch((e) => { console.warn("[attrs] part-stats", e); PART_STATS = null; });
+    MB.loadKit("kit/modular/", KIT_VER).then(async (k) => {
       KIT = k;
       window.__kit = k;
+      try { await partStatsP; } catch (_) {}
       // dev/capture convenience: ?build=s1,upper[,payload]&sides=1
       if (QS.get("build")) {
         const ids = QS.get("build").split(",");
