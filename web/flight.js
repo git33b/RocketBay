@@ -350,8 +350,9 @@
         const oy = Math.max(0, (ch - bandH) / 2);
         const bar = oy * lb0;
         // nose → approx rocket centre in design px (vertical stack, axis ~0.42 len below nose)
-        const noseInBand = (ho.noseScreenY - bar) / Math.max(1e-3, s);
-        py0 = clamp(noseInBand + ROCKET_LEN * 0.42, 220, 500);
+                const noseInBand = (ho.noseScreenY - bar) / Math.max(1e-3, s);
+        // Nose-high in the play strip (pad follow). Soft clamp — avoid floor/ceiling teleport.
+        py0 = clamp(noseInBand + ROCKET_LEN * 0.42, 240, 420);
       }
       this.py = py0; this.vy = -70; this.tilt = -Math.PI / 2;
       this.speed = 0; this.hazardsOn = false; this._climbShake = 0;
