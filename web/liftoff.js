@@ -2068,7 +2068,7 @@
         const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
         if (D > 1 && blendOk) zAllowed = clamp((wrapH + 8 - tgtP) / D, ZOOM_PORT_MIN, 1);
         // Ease portrait zoom-out with climb so early climb stays pad-close, late climb hits game scale.
-        const zu = this._pickupT >= 0 ? smooth01(0.15, 1.7, this.climbT - this._pickupT) : 0; // v4: reach game scale by ~2.0s
+        const zu = this._pickupT >= 0 ? smooth01(0.1, 1.4, this.climbT - this._pickupT) : 0; // v4: reach game scale by ~2.15s
         zAllowed = 1 + (zAllowed - 1) * zu;
       }
       {
@@ -2231,9 +2231,11 @@
         const noseSy = (typeof global.__liftoffState === "object" && global.__liftoffState && global.__liftoffState.noseScreenY != null)
           ? global.__liftoffState.noseScreenY
           : (this._tipLocal0 != null ? z * (this._tipLocal0 - this.rocketY * ((this._lb && this._lb.height / this._lb.nh) || 1)) + (this._camYi || 0) : wrapH * 0.2);
-        const earlyZoom = landscape ? (t >= 2.1 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.0 && z <= HANDOFF_ZOOM_PORT);
-        // If nose is within ~12% of the top, hand off now — never let the rocket vanish off-screen (v4).
-        const nearTop = t >= 1.6 && noseSy < wrapH * 0.12;
+        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.15 && z <= HANDOFF_ZOOM_PORT);
+        // Follow parks nose ~10% down — that is healthy framing, NOT a vanish.
+        // Only nearTop-bail if nose is truly leaving the frame (<2% / negative).
+        const nearTop = t >= 2.0 && noseSy < wrapH * 0.02;
+        // v4 target: handoff into play ~2.31 (CLIMB_DUR=2.45). Never before 2.1s except true vanish bail.
         if (t >= CLIMB_DUR || earlyZoom || nearTop) {
           this.running = false;
           this.finished = true;
