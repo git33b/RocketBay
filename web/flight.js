@@ -527,7 +527,7 @@
     const cluster = R() < (CLUSTER_P * (0.55 + 0.9 * u));
     let n;
     if (cluster) n = 2 + (R() < (0.35 + 0.4 * u) ? 1 : 0);
-    else n = (R() < (0.55 - 0.25 * u)) ? 1 : 2;
+    else n = (R() < (0.38 - 0.2 * u)) ? 1 : 2; // L1 often 2; later almost always 2+
 
     const pool = DEBRIS_MIX[zone];
     const used = [];
