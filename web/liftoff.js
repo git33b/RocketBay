@@ -2,7 +2,8 @@
  * Rocket Bay — LIFTOFF-FEEL v3 polish
  * Cellular flame (hull-scaled, altitude plume), dithered opaque smoke, long t² flight
  * with accelerating follow cam, altitude sky + parallax clouds / streaking stars.
- * Timing preserved: T-5 countdown, T-2 ignition, 0.5s hold, t² climb (now 6s + 1.5s exit).
+ * Timing: T-5 countdown, T-2 ignition, 0.5s hold, t² climb + zoom-out, mid-air handoff (no exit fly-off).
+ * gp1-beta seam: one pad liftoff only — hand off to flight already mid-air at zoomed framing.
  */
 (function (global) {
   "use strict";
@@ -10,8 +11,9 @@
   const BUILD = "audio1";
   const POOL_GROUND = 260;
   const POOL_TRAIL = 160;
-  const CLIMB_DUR = 6.0;   // seconds of powered climb on screen after the 0.5s hold
-  const EXIT_DUR = 1.5;    // camera eases off, rocket exits top — flight ends on the flight
+  const CLIMB_DUR = 4.2;   // powered climb + camera zoom-out, then mid-air handoff (was 6s + 1.5s exit)
+  const EXIT_DUR = 0.0;    // unused — no off-screen exit; flight owns settle after handoff
+  const HANDOFF_ZOOM_LAND = 0.92; // landscape: prefer handoff once zoomed out past this (or at CLIMB_DUR)
   const CLIMB_A = 140;
   const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
   const ZOOM_LAND_FLOOR = 0.58; // landscape zoom floor: adaptive per stack (tall stacks need room for the plume)
@@ -2150,34 +2152,32 @@
         this.flameIntensity = lerp(this.flameIntensity, 1.15, 0.15);
         this.emitGroundSmoke(seat, 1.1);
         this.emitTrail(seat);
-      } else if (since < 0.5 + CLIMB_DUR + EXIT_DUR) {
+      } else {
+        // Powered climb + follow zoom-out. Hand off mid-air (no exit fly-off / second takeoff).
         const t = since - 0.5;
         this.climbT = t;
         this.rocketY = 3 + CLIMB_A * t * t;
-        if (t < CLIMB_DUR) {
-          this.phase = "climb";
-        } else {
-          if (this.phase !== "exit") {
-            this.phase = "exit";
-            this._exitCam0 = this.camY;
-            this._exitV0 = this._camVel || 0;
-          }
-          this.exitT = t - CLIMB_DUR;
-        }
+        this.phase = "climb";
         this.shake = Math.max(0, this.shake - 9 * dt);
         this.flameIntensity = lerp(this.flameIntensity, 1.35, 0.08);
         if (t < 1.2) this.emitGroundSmoke(seat, Math.max(0.3, 1.0 - t * 0.5));
-        this.setAudioLevel(clamp(0.5 - t * 0.06, 0.08, 0.5) * (this.phase === "exit" ? clamp(1 - this.exitT / EXIT_DUR, 0, 1) : 1));
-      } else {
-        // End on the flight: freeze the last frame (sky + departing plume), no cut to the pad
-        this.running = false;
-        this.finished = true;
-        this.phase = "done";
-        this.stopAudio(false);
-        try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "done", finished: true, running: false }); } catch (_) {}
-        if (this.onPerfSample) this.onPerfSample(this.perf.slice());
-        this.onComplete();
-        return;
+        this.setAudioLevel(clamp(0.5 - t * 0.06, 0.08, 0.5));
+        // Always hand off at CLIMB_DUR (mid-air). Early ok once landscape zoom has eased out.
+        const wrap = this.getWorldEl && this.getWorldEl();
+        const landscape = !!(wrap && wrap.clientWidth > wrap.clientHeight);
+        const z = this._zoom || 1;
+        const early = landscape && t >= 3.0 && z <= HANDOFF_ZOOM_LAND;
+        if (t >= CLIMB_DUR || early) {
+          this.running = false;
+          this.finished = true;
+          this.phase = "done";
+          this.stopAudio(false);
+          const handoff = { seamFromPad: true, zoom: z, climbT: t, camY: this.camY };
+          try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "done", finished: true, running: false, handoff: handoff }); } catch (_) {}
+          if (this.onPerfSample) this.onPerfSample(this.perf.slice());
+          this.onComplete(handoff);
+          return;
+        }
       }
     }
 

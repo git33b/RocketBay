@@ -1085,10 +1085,11 @@
         getCountdownEl: () => countdownHud,
         getStackEl: () => stackEl,
         getPlateEl: () => plate,
-        onComplete: () => {
+        onComplete: (handoff) => {
           state.flightBackdrop = true;
           clearStackOverlay();
-          startFlight();
+          // gp1-beta: pad did the only liftoff — flight starts mid-air (settle), never re-climbs
+          startFlight(false, { seamFromPad: true, handoff: handoff || null });
         },
         onPerfSample: (samples) => { window.__liftoffPerf = samples; },
       });
@@ -1214,7 +1215,7 @@
       if (!QS.has("bot")) return null;
       return { deployAtKm: +QS.get("deployKm") || 0, crashAtKm: +QS.get("crashKm") || 0 };
     }
-    async function startFlight(retry) {
+    async function startFlight(retry, seamOpts) {
       state.phase = "flight";
       setChrome();
       history.replaceState(null, "", `${location.search}#${TODS[state.todIndex].id}-flight`);
@@ -1237,11 +1238,22 @@
         forceBh: LAB || QS.has("bhforce") || QS.has("bh"), debugHitbox: QS.has("hitbox") || LAB,
         tutorial: LAB ? false : showTut,
         lab: LAB,
+        seamFromPad: !!(seamOpts && seamOpts.seamFromPad),
+        skipClimb: !!(retry || (seamOpts && (seamOpts.seamFromPad || seamOpts.skipClimb))),
       });
       window.__flightInfo = { mode: sprites.mode, packKey: sprites.packKey, chain: f.chain.map((n) => [+n.x.toFixed(1), +n.y.toFixed(1), +n.r.toFixed(1)]), seed };
-      flDeploy.classList.add("on"); flPause.classList.add("on");
-      updateDeployBtn();
-      clearInterval(deployTimer); deployTimer = setInterval(updateDeployBtn, 100);
+      const fromPadSeam = !!(seamOpts && seamOpts.seamFromPad) && !retry && !LAB;
+      const revealFlightChrome = () => {
+        flDeploy.classList.add("on"); flPause.classList.add("on");
+        updateDeployBtn();
+        clearInterval(deployTimer); deployTimer = setInterval(updateDeployBtn, 100);
+      };
+      f.o.onHudReveal = () => { if (fromPadSeam) revealFlightChrome(); };
+      if (fromPadSeam) {
+        flDeploy.classList.remove("on"); flPause.classList.remove("on");
+      } else {
+        revealFlightChrome();
+      }
     }
     function stopFlight() {
       clearInterval(deployTimer);
