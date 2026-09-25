@@ -278,8 +278,8 @@
       this.wantTutorial = false; this.tutorialDone = true;
       this.nextGateX = this.cam + Math.max(this.viewW, 760) * 0.4 + 80;
       this.nextMeteorAt = this.t + 1.2 + this._rand() * 0.8;
-      // early BH within ~5–10s so pull/spin/debris drift are obvious
-      this.nextBhAt = this.t + 5 + this._rand() * 5;
+      // bh1c: force first BH on-screen by ~5s (spawn timer 2–3.5s; X placed in-view)
+      this.nextBhAt = this.t + 2 + this._rand() * 1.5;
       this.bodyY = 720;
       this._log("lab", this.t);
     }
@@ -522,6 +522,12 @@
     }
     try { this._spawnMeteors(); }
     catch (err) { if (typeof console !== "undefined") console.warn("[flight2b] meteor spawn", err); }
+    // bh1c watchdog: if lab/forceBh and no BH on screen by ~7s, hard-fire spawn now
+    if ((this.cfg && (this.cfg.forceBh || this.cfg.lab)) && this.t >= 7 && this.bhN === 0) {
+      let any = false;
+      for (let i = 0; i < this.haz.length; i++) if (this.haz[i].on && this.haz[i].kind === 3) { any = true; break; }
+      if (!any) this.nextBhAt = Math.min(this.nextBhAt, this.t);
+    }
     try { this._spawnBlackholes(); }
     catch (err) { if (typeof console !== "undefined") console.warn("[bh1] blackhole spawn", err); }
   };
@@ -556,6 +562,7 @@
     const R = () => this._rand();
     const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
     const force = !!(this.cfg && this.cfg.forceBh);
+    const lab = !!(this.cfg && this.cfg.lab);
     // L1 rare/absent unless forced for evidence
     if (!force && this.km() < BH_MIN_KM && this.phaseT < 18) {
       this.nextBhAt = this.t + 4 + R() * 4;
@@ -569,27 +576,52 @@
       }
     }
     const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
+    // Schedule next attempt now; force/lab never silently skip this attempt
     this.nextBhAt = this.t + Math.max(8, gap);
-    if (!force && !(this.cfg && this.cfg.lab) && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
+    if (!force && !lab && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
 
     const drawW = BH_DRAW_W * (0.92 + R() * 0.16);
-    // Continuous Y anywhere on playable band — bias slightly so one skirt is always open
     const yMin = 110, yMax = WORLD_H - 110;
-    let y = yMin + R() * (yMax - yMin);
-    // Prefer upper or lower third ~60% so skirt is obvious
-    if (R() < 0.6) y = R() < 0.5 ? (yMin + R() * 160) : (yMax - R() * 160);
-    // Place ahead of view so player approaches the well
-    const x = this.cam + this.viewW + 140 + R() * 120;
 
-    // Escape-path / don't brick: if nearby ahead debris already clogs both skirts, nudge Y
-    let clogTop = 0, clogBot = 0;
-    for (let i = 0; i < this.haz.length; i++) {
-      const o = this.haz[i]; if (!o.on || o.par !== 1 || o.kind === 3) continue;
-      if (Math.abs(o.x - x) > BH_PULL_R * 0.85) continue;
-      if (o.y < WORLD_H * 0.45) clogTop++; else clogBot++;
+    // bh1c: lab/forceBh place ON SCREEN (in front of rocket). Normal rare BH stays ahead of view.
+    // Root cause of CoE miss: prior X = cam+viewW+140 left sx≈900 off the right edge at spawn.
+    let x;
+    if (force || lab) {
+      // Fixed-ish fraction of viewW so BH is visible without scrolling (~viewW*0.55–0.75)
+      const frac = this.bhN === 0 ? 0.62 : (0.55 + R() * 0.2);
+      x = this.cam + this.viewW * frac;
+    } else {
+      x = this.cam + this.viewW + 140 + R() * 120;
     }
+
+    // Pick Y with skirt escape; for force/lab RETRY immediately — never defer past window
+    function clogAt(self, xx, yy) {
+      let clogTop = 0, clogBot = 0;
+      for (let i = 0; i < self.haz.length; i++) {
+        const o = self.haz[i]; if (!o.on || o.par !== 1 || o.kind === 3) continue;
+        if (Math.abs(o.x - xx) > BH_PULL_R * 0.85) continue;
+        if (o.y < WORLD_H * 0.45) clogTop++; else clogBot++;
+      }
+      return { clogTop, clogBot };
+    }
+    let y = yMin + R() * (yMax - yMin);
+    if (R() < 0.6) y = R() < 0.5 ? (yMin + R() * 160) : (yMax - R() * 160);
+    let { clogTop, clogBot } = clogAt(this, x, y);
     if (clogTop >= 2 && clogBot < 2) y = Math.max(y, WORLD_H * 0.58);
     else if (clogBot >= 2 && clogTop < 2) y = Math.min(y, WORLD_H * 0.42);
+    if (force || lab) {
+      // up to 6 Y retries; if still clogged both skirts, force upper or lower skirt spawn
+      for (let attempt = 0; attempt < 6; attempt++) {
+        ({ clogTop, clogBot } = clogAt(this, x, y));
+        if (clogTop < 2 || clogBot < 2) break;
+        y = attempt % 2 === 0 ? (yMin + R() * 140) : (yMax - R() * 140);
+      }
+      ({ clogTop, clogBot } = clogAt(this, x, y));
+      if (clogTop >= 2 && clogBot >= 2) {
+        // hard skirt: place in less-clogged third so ONE escape path stays open
+        y = clogTop <= clogBot ? (yMin + 40 + R() * 80) : (yMax - 40 - R() * 80);
+      }
+    }
 
     const h = this._hazard("hazard-blackhole", x, y, drawW, 1, 0, 0, this._zoneAtX(x));
     if (h) {
@@ -598,6 +630,9 @@
       h.pullR = BH_PULL_R;
       this.bhN++;
       this._log("bh_spawn", this.t);
+    } else if (force || lab) {
+      // Pool exhausted — retry very soon rather than wait full gap (must show BH by ~8s)
+      this.nextBhAt = this.t + 0.25;
     }
   };
   P._bhPullPlayer = function (dt) {
