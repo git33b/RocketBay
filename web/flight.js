@@ -1,4 +1,6 @@
-/* RocketBay FLIGHT MODE v1 (flight-v1)
+/* RocketBay FLIGHT MODE v1 / flight2 (flight-v1 branch)
+ * flight-pack-v1.3.2-anywhere-density: anywhere spawn, rate/density progression,
+ * meteors from right, unpredictability_lock, first-flight tutorial.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -52,6 +54,7 @@
   const DEBRIS_DRAW = { // typical draw widths from qa-flight-pack-v1.3-debris.json
     "hazard-station": 140, "hazard-telescope": 110, "hazard-satellite": 84,
     "hazard-wreckage_0": 70, "hazard-wreckage_1": 72, "hazard-wreckage_2": 64,
+    "hazard-meteor": 64,
   };
 
   const ZONES = [
@@ -79,6 +82,8 @@
     "hazard-wreckage_0": [94, 50, 44.7, 24.5, 18.5],
     "hazard-wreckage_1": [100, 50, 53.5, 22.3, 22.0],
     "hazard-wreckage_2": [71, 50, 33.0, 24.6, 16.2],
+    // flight-pack-v1.3.2 meteor (rock body hitbox; fiery tail NON-colliding)
+    "hazard-meteor": [64, 40, 22.0, 22.0, 12.0],
   };
   // pack deploy / crash frame sets (manifest flight-pack-v1.deploy / .crash; steel regenerated in v1.1)
   const PACK_STACKS = {
@@ -176,7 +181,8 @@
   // Everything the first seconds need (climb bridge for this TOD, orbit tile, earth limb, hazards, HUD)
   P.preload = function (tod) {
     const core = ["climb-bridge-" + tod + ".png", "bg-orbit-edge-tile.png", "earth-limb.png", "parallax/far-stars-tile.png",
-      "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png"];
+      "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png",
+      "hazard-meteor.png", "tutorial/FT-first-flight-overlay.png"];
     for (let i = 0; i < 5; i++) core.push("coin_f" + i + ".png", "asteroid_" + i + ".png");
     this._padSrc = this.o.padPlate ? this.o.padPlate(tod) : null;
     const p = this._need(core);
@@ -194,7 +200,7 @@
       for (let i = 0; i < 4; i++) rest.push("parallax/decor-planets/z" + z + "-far-" + i + ".png");
     }
     for (let i = 0; i < 5; i++) rest.push("zones/ice-hazard-variants/asteroid_" + i + ".png");
-    ["hazard-station","hazard-telescope","hazard-satellite","hazard-wreckage_0","hazard-wreckage_1","hazard-wreckage_2"].forEach((n) => rest.push(n + ".png"));
+    ["hazard-station","hazard-telescope","hazard-satellite","hazard-wreckage_0","hazard-wreckage_1","hazard-wreckage_2","hazard-meteor"].forEach((n) => rest.push(n + ".png"));
     let i = 0; const next = () => { if (i >= rest.length) return; const r = rest[i++]; this._get(r); this.img[r].p.then(next); };
     next(); next(); next();
   };
@@ -231,6 +237,11 @@
     this.nextGateX = 900; this.gateN = 0; this.lastGapC = 360; this.nextExtraX = 1200;
     this.planetBlock = { top0: 0, top1: -1, topY: 0, bot0: 0, bot1: -1, botY: 720 };
     this.zoneIdx = 0; this.bannerT = -10; this.bannerZone = 0; this.comet = { on: false, x: 0, y: 0 }; this.cometZone = -1;
+    this.wantTutorial = !!(cfg && cfg.tutorial);
+    this.tutorialDone = !this.wantTutorial;
+    this.practiceT = 0; this.hazardsOn = !this.wantTutorial;
+    this.nextMeteorAt = 0; this.meteorN = 0;
+    this.lastGateSig = ""; this.gapJitter = 0;
     this.nextDecorX = 0; this.popT = -10; this.gameOverFired = false; this.result = null; this.events.length = 0;
     this.bodyY = 720; this.accum = 0; this.lastTs = 0; this.fps = []; this._flash = 0;
     for (const a of [this.haz, this.pick, this.fx, this.decor]) for (const o of a) o.on = false;
@@ -276,6 +287,7 @@
   /* ---- input ---- */
   P.setHold = function (on) {
     on = !!on;
+    if (this.phase === "tutorial" && on) { this.dismissTutorial(); return; }
     if (on === this.holding) return;
     this.holding = on;
   };
@@ -333,7 +345,50 @@
       this.px = 640 + (PLAYER_X - 640) * ease(u);
       this.tilt = -Math.PI / 2 * (1 - ease(u));
       this.bodyY = 720 + (105 - 720) * easeOut(u);
-      if (this.phaseT >= PITCH_T) { this.phase = "flight"; this.phaseT = 0; this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this._log("thrust", this.t, hold); this._lastHold = hold; }
+      if (this.phaseT >= PITCH_T) {
+        this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
+        this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
+        if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
+        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextMeteorAt = this.t + 4 + this._rand() * 3; }
+      }
+      return;
+    }
+    // ---- first-flight tutorial (overlay) ----
+    if (this.phase === "tutorial") {
+      this.speed = SPEED0 * 0.28;
+      this.cam += this.speed * dt; this.dist = this.cam;
+      // gentle idle mid-screen
+      this.py += (360 - this.py) * Math.min(1, 2.2 * dt);
+      this.vy *= 0.9;
+      this.tilt += (0.08 - this.tilt) * Math.min(1, 4 * dt);
+      this._stepObjects(dt);
+      // auto-advance ~7s if no tap
+      if (this.phaseT >= 7.0) this.dismissTutorial();
+      return;
+    }
+    // ---- open practice (~4s, no hazards) ----
+    if (this.phase === "practice") {
+      this.practiceT += dt;
+      this.speed = Math.min(SPEED0, SPEED0 * 0.55 + 40 * this.practiceT);
+      this.cam += this.speed * dt; this.dist = this.cam;
+      const thrusting = hold && this.fuel > 0;
+      if (thrusting !== this._lastHold) { this._lastHold = thrusting; this._log("thrust", this.t, thrusting); if (this.voice) { const a = this.o.getAudio(); this.voice.setThrust(thrusting, a.ctx.currentTime); } }
+      this.vy += (GRAVITY - (thrusting ? THRUST : 0)) * dt;
+      this.vy = clamp(this.vy, -VY_MAX, VY_MAX);
+      this.py += this.vy * dt;
+      if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
+      const tt = (this.vy / VY_MAX) * TILT_MAX;
+      this.tilt += (tt - this.tilt) * Math.min(1, TILT_RATE * dt);
+      // keep in band
+      if (this.py < 40) { this.py = 40; this.vy = Math.max(0, this.vy); }
+      if (this.py > WORLD_H - 40) { this.py = WORLD_H - 40; this.vy = Math.min(0, this.vy); }
+      this._stepObjects(dt);
+      if (this.practiceT >= 4.0) {
+        this.phase = "flight"; this.phaseT = 0; this.hazardsOn = true;
+        this.nextGateX = this.cam + this.viewW * 0.85 + 220;
+        this.nextMeteorAt = this.t + 2.5 + this._rand() * 2;
+        this._log("hazards", this.t);
+      }
       return;
     }
     // ---- flight / crash ----
@@ -373,11 +428,38 @@
   /* ---- world generation (deterministic per seed; RNG order independent of screen size) ---- */
   P._tier = function () { const s = this.speed; for (let i = 0; i < TIERS.length; i++) if (s <= TIERS[i].max) return TIERS[i]; return TIERS[3]; };
   P._zoneAtX = function (wx) { return mod(Math.floor((PAR.zone * wx + 260) / SEG), 6); };
+  P.dismissTutorial = function () {
+    if (this.phase !== "tutorial") return;
+    this.phase = "practice"; this.phaseT = 0; this.practiceT = 0; this.tutorialDone = true;
+    this._log("tutorial_dismiss", this.t);
+    if (this.o.onTutorialDone) try { this.o.onTutorialDone(); } catch (_) {}
+  };
   P._spawn = function () {
+    // decor always
+    while (this.nextDecorX < this.cam * PAR.mid + this.viewW + 200) this._decor();
+    if (!this.hazardsOn || this.phase !== "flight") return;
     const ahead = this.cam + Math.max(this.viewW, 1600) + 260;
     while (this.nextGateX < ahead) this._gate(this.nextGateX);
-    // decor (mid 0.5x / far 0.2x) - spawn in their own parallax space
-    while (this.nextDecorX < this.cam * PAR.mid + this.viewW + 200) this._decor();
+    this._spawnMeteors();
+  };
+  // v1.3.2 meteors: enter from RIGHT, move left (+ slight vy); rate rises with depth
+  P._spawnMeteors = function () {
+    if (this.t < this.nextMeteorAt) return;
+    const R = () => this._rand();
+    const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
+    // L1 sparse (~every 5-7s); later denser (~every 1.4-2.5s), bursts of 1-3
+    const gap = (5.5 - 3.6 * u) * (0.75 + R() * 0.5);
+    this.nextMeteorAt = this.t + Math.max(1.1, gap);
+    const burst = 1 + (R() < 0.25 + 0.35 * u ? 1 : 0) + (R() < 0.12 * u ? 1 : 0);
+    for (let i = 0; i < burst; i++) {
+      const drawW = 48 + R() * 32;
+      const y = 84 + R() * (WORLD_H - 168); // anywhere excl. HUD/chrome bands
+      const x = this.cam + this.viewW + 60 + i * (70 + R() * 90);
+      const vx = -(140 + 120 * u + R() * 90); // cross left against/with scroll
+      const vy = (R() * 2 - 1) * (30 + 50 * u);
+      const h = this._hazard("hazard-meteor", x, y, drawW, 1, vx, vy, this._zoneAtX(x));
+      if (h) { h.rot = -0.4 - R() * 0.5; this.meteorN++; }
+    }
   };
   P._hazard = function (name, x, y, drawW, par, vx, vy, zone) {
     let h = null; for (let i = 0; i < this.haz.length; i++) if (!this.haz[i].on) { h = this.haz[i]; break; }
@@ -397,99 +479,124 @@
     p.im = name + ".png"; p.dw = m[0] * sc; p.dh = m[1] * sc; p.ox = m[2] * sc; p.oy = m[3] * sc; p.sc = sc;
   };
   P._gate = function (gx) {
-    // Escape-gap LOCK (Ateeb): every wall leaves >=1 gap that tightens with distance.
-    // Spacing (v1.3.1): SPREAD is the default (1-2 hazards, 180-320 px hx); dense 2-3 packs ~20%.
+    // v1.3.2-anywhere-density + unpredictability_lock + escape-gap + spread/cluster
     const T = this._tier(), R = () => this._rand();
     const zone = this._zoneAtX(gx), Z = ZONES[zone];
     this.gateN++;
-    // gap height: tier floor, also never above GAP_START; eases toward rocket+margin as speed rises
     const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
-    const gapFloor = T.gap;                                      // 300 / 265 / 235 / 210
-    const gapH = Math.max(gapFloor, Math.round(GAP_START + (gapFloor - GAP_START) * u)) + Math.floor(R() * 30);
-    let lo = gapH / 2 + 34, hi = WORLD_H - gapH / 2 - 34;
+    // Progression = rate + density (not fixed patterns): tighter spacing + more pieces later
+    const spacingJitter = (R() * 2 - 1) * (40 + 30 * u);
+    const spacing = Math.max(420, T.spacing + spacingJitter - Math.floor(40 * u));
+    // Gap: tier floor, varies each wall (unpredictable), never vanishes
+    const gapFloor = T.gap;
+    const gapVar = Math.floor(R() * (55 + 40 * (1 - u))); // more variance early
+    const gapH = Math.max(gapFloor, Math.round(GAP_START + (gapFloor - GAP_START) * u) + gapVar - Math.floor(20 * u));
+    // Continuous Y anywhere on playable screen (exclude HUD ~y<84 / bottom chrome ~y>WORLD_H-40)
+    const yMin = 84, yMax = WORLD_H - 40;
+    let lo = gapH / 2 + yMin, hi = yMax - gapH / 2;
     const pb = this.planetBlock;
     if (gx >= pb.top0 && gx <= pb.top1) lo = Math.max(lo, pb.topY + gapH / 2 + 30);
     if (gx >= pb.bot0 && gx <= pb.bot1) hi = Math.min(hi, pb.botY - gapH / 2 - 30);
-    if (lo > hi) { const m = (lo + hi) / 2; lo = hi = m; }
-    let c = this.lastGapC + (R() * 2 - 1) * T.shift;
-    c = clamp(c, Math.max(lo, this.lastGapC - T.shift), Math.min(hi, this.lastGapC + T.shift));
-    if (c < lo || c > hi) c = clamp(c, lo, hi);
+    if (lo > hi) { const mid = (lo + hi) / 2; lo = hi = mid; }
+    // Unpredictable gap centre: large jump, avoid last signature (no copy-paste walls)
+    let c = yMin + gapH / 2 + R() * Math.max(1, (yMax - yMin - gapH));
+    c = clamp(c, lo, hi);
+    // Soft anti-repeat: if too close to last centre with similar gap, shove
+    if (Math.abs(c - this.lastGapC) < 35 && Math.abs(gapH - this.gapJitter) < 25) {
+      c = clamp(c + (R() < 0.5 ? -1 : 1) * (80 + R() * 120), lo, hi);
+    }
+    this.gapJitter = gapH;
     const g0 = c - gapH / 2, g1 = c + gapH / 2;
-    // layout
-    const cluster = R() < CLUSTER_P;
-    const n = cluster ? (2 + (R() < 0.5 ? 1 : 0)) : (1 + (R() < 0.55 ? 1 : 0)); // spread 1-2, cluster 2-3
+    // Density: L1 prefer 1; later more 2 and occasional 3-cluster
+    const clusterP = CLUSTER_P * (0.55 + 0.9 * u);
+    const cluster = R() < clusterP;
+    let n;
+    if (cluster) n = 2 + (R() < (0.35 + 0.4 * u) ? 1 : 0);
+    else n = (R() < (0.62 - 0.25 * u)) ? 1 : 2; // L1 mostly 1; later more 2
     const pool = DEBRIS_MIX[zone];
-    const pickName = () => pool[Math.floor(R() * pool.length)];
+    const pickName = () => {
+      // Prefer mixed silhouettes; avoid same name twice in a wall when possible
+      let name = pool[Math.floor(R() * pool.length)], tries = 0;
+      while (tries++ < 4 && this._gateNames && this._gateNames.indexOf(name) >= 0)
+        name = pool[Math.floor(R() * pool.length)];
+      return name;
+    };
+    this._gateNames = [];
     const drawWFor = (name) => {
-      if (DEBRIS_DRAW[name] != null) return DEBRIS_DRAW[name] * (0.9 + R() * 0.2);
-      // asteroid
+      if (DEBRIS_DRAW[name] != null) {
+        const base = DEBRIS_DRAW[name];
+        return base * (0.85 + R() * 0.35); // size mix = silhouette hierarchy
+      }
       return (Z.small ? 44 + R() * 26 : 50 + R() * 70);
     };
-    // place a piece fully OUTSIDE the escape lane [g0, g1]; returns false if no room
+    // Place OUTSIDE escape lane; Y continuous anywhere (soft mid bias only)
     const place = (name, x, preferSide) => {
       const w = drawWFor(name), m = SPR[name]; if (!m) return false;
       const sc = w / m[0], rr = m[4] * sc, visR = rr / 0.8;
-      // side: -1 above gap, +1 below; soft middle-bias for the blocking mass (0.2/0.6/0.2)
       let side = preferSide;
       if (side == null) {
         const b = R();
-        side = b < 0.2 ? -1 : b < 0.8 ? (c < WORLD_H / 2 ? 1 : -1) : (R() < 0.5 ? -1 : 1);
+        // soft mid bias for blocking mass, NOT a hard lane lock
+        side = b < 0.18 ? -1 : b < 0.82 ? (c < WORLD_H / 2 ? 1 : -1) : (R() < 0.5 ? -1 : 1);
       }
-      const edgePad = visR + 8;
+      const edgePad = Math.max(yMin + visR, visR + 4);
+      const edgePadBot = Math.min(yMax - visR, WORLD_H - visR - 4);
       let cy;
       if (side < 0) {
         const maxY = g0 - visR - 4;
         if (maxY < edgePad) return false;
-        // bias toward the gap edge (reads as a wall) but keep separation
-        cy = maxY - R() * Math.min(110, maxY - edgePad);
+        // continuous anywhere above gap (not discrete rows)
+        cy = edgePad + R() * Math.max(1, maxY - edgePad);
       } else {
         const minY = g1 + visR + 4;
-        if (minY > WORLD_H - edgePad) return false;
-        cy = minY + R() * Math.min(110, WORLD_H - edgePad - minY);
+        if (minY > edgePadBot) return false;
+        cy = minY + R() * Math.max(1, edgePadBot - minY);
       }
-      // soft bias: nudge off any nearby decor planet centre (v1.2.1 ~25% max overlap at spawn)
+      // soft nudge off decor planet centres
       for (let i = 0; i < this.decor.length; i++) {
         const d = this.decor[i]; if (!d.on) continue;
         const dx = (d.x - this.cam * d.par) - (x - this.cam);
         if (Math.abs(dx) > 120) continue;
-        if (Math.abs(d.y - cy) < 50) cy += (cy < d.y ? -1 : 1) * 40;
+        if (Math.abs(d.y - cy) < 50) cy += (cy < d.y ? -1 : 1) * (30 + R() * 25);
       }
-      cy = clamp(cy, edgePad, WORLD_H - edgePad);
-      // final lane check (never invade the escape gap)
+      cy = clamp(cy, edgePad, edgePadBot);
       if (cy + visR > g0 && cy - visR < g1) return false;
       this._hazard(name, x, cy, w, 1, 0, 0, zone);
+      this._gateNames.push(name);
       return true;
     };
-    // horizontal layout
+    // Asymmetric layouts — never mirrored twins / even grids
     if (cluster) {
-      // tight pack on ONE side of the gap; pieces share ~40-70 px hx
       const side = R() < 0.5 ? -1 : 1;
-      let x0 = gx - (n - 1) * 30;
+      let x0 = gx - (n - 1) * (25 + R() * 20);
       for (let i = 0; i < n; i++) {
-        place(pickName(), x0 + i * (40 + R() * 30), side);
+        // uneven hx + occasional side flip on last piece for asymmetry
+        const s = (i === n - 1 && R() < 0.35) ? -side : side;
+        place(pickName(), x0 + i * (36 + R() * 40), s);
       }
     } else if (n === 1) {
-      place(pickName(), gx + (R() * 2 - 1) * 20, null);
+      place(pickName(), gx + (R() * 2 - 1) * (15 + R() * 40), null);
     } else {
-      // two pieces, loose hx 180-320; prefer opposite sides of the lane
       const hx = SPREAD_HX[0] + R() * (SPREAD_HX[1] - SPREAD_HX[0]);
       const side0 = R() < 0.5 ? -1 : 1;
-      place(pickName(), gx - hx * 0.35, side0);
-      place(pickName(), gx + hx * 0.35, -side0);
+      // unequal offsets (not left/right twins)
+      place(pickName(), gx - hx * (0.25 + R() * 0.25), side0);
+      place(pickName(), gx + hx * (0.3 + R() * 0.35), R() < 0.78 ? -side0 : side0);
     }
-    // bookkeeping for autopilot / evidence
+    const sig = [Math.round(c / 40), Math.round(gapH / 20), n, cluster ? 1 : 0].join(":");
+    this.lastGateSig = sig;
     if (!this.gates) this.gates = [];
     if (this.gates.length > 24) this.gates.shift();
     this.gates.push({ x: gx, c: c, gapH: gapH, n: n, cluster: cluster, g0: g0, g1: g1 });
 
-    // planet (big slow 0.7x) — unchanged; blocks later gaps
+    // planet (big slow 0.7x)
     const mix = Z.mix;
     if (mix.planet > 0 && R() < 0.22 * mix.planet && this.gateN > 2) {
       const pk = R(), name = zone === 3 ? (pk < 0.5 ? "planet_ringed" : "planet_moon") : (pk < 0.6 ? "planet_gas" : "planet_moon");
       const drawW = name === "planet_ringed" ? 420 + R() * 100 : name === "planet_gas" ? 220 + R() * 100 : 140 + R() * 80;
       const m = SPR[name], r = m[4] * (drawW / m[0]);
       const top = R() < 0.5, cy = top ? -r * 0.35 : WORLD_H + r * 0.35;
-      const lead = gx + T.spacing * 1.5;
+      const lead = gx + spacing * 1.5;
       const camAt = lead - PLAYER_X;
       const xp = PAR.planets * camAt + PLAYER_X;
       const gA = (xp - PLAYER_X - r - 60) / PAR.planets + PLAYER_X, gB = (xp - PLAYER_X + r + 60) / PAR.planets + PLAYER_X;
@@ -498,12 +605,12 @@
         if (top) { pb.top0 = gA; pb.top1 = gB; pb.topY = cy + r; } else { pb.bot0 = gA; pb.bot1 = gB; pb.botY = cy - r; }
       }
     }
-    // pickups along the escape lane
-    const prevX = gx - T.spacing, pc = this.lastGapC;
-    if (R() < Math.min(1, T.arcs * T.spacing / 1000)) {
-      const nn = 6 + Math.floor(R() * 5), x0 = prevX + T.spacing * 0.3, step = 36, amp = 30 + R() * 40;
+    // pickups along escape lane
+    const prevX = gx - spacing, pc = this.lastGapC;
+    if (R() < Math.min(1, T.arcs * spacing / 1000)) {
+      const nn = 6 + Math.floor(R() * 5), x0 = prevX + spacing * 0.3, step = 36, amp = 30 + R() * 40;
       for (let i = 0; i < nn; i++) {
-        const uu = i / (nn - 1), x = x0 + i * step, base = pc + (c - pc) * clamp((x - prevX) / T.spacing, 0, 1);
+        const uu = i / (nn - 1), x = x0 + i * step, base = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1);
         this._pickup(0, x, base - Math.sin(uu * Math.PI) * amp);
       }
     }
@@ -514,18 +621,21 @@
       else if (q < T.shield + T.magnet) this._pickup(3, gx, c);
       else if (q < T.shield + T.magnet + T.gem) this._pickup(4, gx, c);
     }
-    // extras between gates (comet / ember / stray rock) — still leave the lane clear
-    const extraN = T.extra * T.spacing / 1000 * 0.25 * (mix.asteroid + mix.comet + mix.ember);
+    // extras between gates (stray rocks / ember / comet) — leave lane clear; density rises with u
+    const extraN = T.extra * spacing / 1000 * (0.22 + 0.2 * u) * (mix.asteroid + mix.comet + mix.ember);
     let nE = Math.floor(extraN) + (R() < extraN % 1 ? 1 : 0);
     for (let e = 0; e < nE; e++) {
-      const x = prevX + T.spacing * (0.35 + R() * 0.3);
-      const path = pc + (c - pc) * clamp((x - prevX) / T.spacing, 0, 1);
+      const x = prevX + spacing * (0.25 + R() * 0.5);
+      const path = pc + (c - pc) * clamp((x - prevX) / spacing, 0, 1);
       const typeR = R() * (mix.asteroid + mix.comet + mix.ember + 0.001);
       if (typeR < mix.asteroid) {
         const name = pickName();
         const w = drawWFor(name), m = SPR[name], rr = m[4] * (w / m[0]);
-        const side = R() < 0.5 ? -1 : 1, off = gapH * 0.5 + rr + 30 + R() * 80;
-        const y = path + side * off;
+        // anywhere outside gap (continuous Y)
+        const above = R() < 0.5;
+        const y = above
+          ? (yMin + rr + R() * Math.max(1, g0 - rr - 8 - (yMin + rr)))
+          : (g1 + rr + 8 + R() * Math.max(1, yMax - rr - (g1 + rr + 8)));
         if (y - rr > 0 && y + rr < WORLD_H) this._hazard(name, x, y, w, 1, 0, 0, zone);
       } else if (typeR < mix.asteroid + mix.comet) {
         const w = 120 + R() * 50; this._hazard("comet", x + 420, -60 - R() * 120, w, 1, -170, 150, zone);
@@ -534,7 +644,7 @@
       }
     }
     this.lastGapC = c;
-    this.nextGateX = gx + T.spacing;
+    this.nextGateX = gx + spacing;
   };
 
   P._decor = function () {
@@ -560,7 +670,7 @@
       const h = this.haz[i]; if (!h.on) continue;
       h.x += h.vx * dt; h.y += h.vy * dt;
       const sx = h.x - cam * h.par;
-      if (sx < -h.dw - 300 || h.y > WORLD_H + 400) h.on = false;
+      if (sx < -h.dw - 300 || sx > this.viewW + 500 || h.y > WORLD_H + 400 || h.y < -400) h.on = false;
     }
     const mag = this.magnetT > 0 && !this.crashed;
     for (let i = 0; i < this.pick.length; i++) {
@@ -667,6 +777,11 @@
   /* ---- autopilot (capture / perf runs only: ?bot=1 or capture API) ---- */
   P._botStep = function () {
     const b = this.bot;
+    if (this.phase === "tutorial") { this.dismissTutorial(); this._botHold = false; return; }
+    if (this.phase === "practice") {
+      // gentle mid hold during practice
+      this._botHold = this.py > 360 + 8; return;
+    }
     if (this.phase !== "flight" || this.crashed) { this._botHold = false; return; }
     const km = this.km();
     if (b.deployAtKm && !this.deployed && km >= b.deployAtKm) this.deploy();
@@ -709,6 +824,7 @@
       x.fillStyle = "rgba(100,210,255,0.55)"; x.fillRect(0, -3, VW, 3); x.fillRect(0, WORLD_H, VW, 3);
     }
     this._drawHud(x);
+    this._drawTutorial(x);
   };
   P._drawLetterbox = function (x) {
     // dim mirrored continuation of the zone art above/below the play band (not playable)
@@ -799,7 +915,13 @@
         const im = this._get(h.im); if (!im) continue;
         const sx = h.x - cam * h.par;
         if (sx + h.dw < -50 || sx - h.dw > VW + 50) continue;
-        x.drawImage(im, Math.round(sx - h.ox), Math.round(h.y - h.oy), Math.round(h.dw), Math.round(h.dh));
+        if (h.rot) {
+          x.save(); x.translate(sx, h.y); x.rotate(h.rot);
+          x.drawImage(im, Math.round(-h.ox), Math.round(-h.oy), Math.round(h.dw), Math.round(h.dh));
+          x.restore();
+        } else {
+          x.drawImage(im, Math.round(sx - h.ox), Math.round(h.y - h.oy), Math.round(h.dw), Math.round(h.dh));
+        }
       }
     }
     for (let i = 0; i < this.pick.length; i++) {
@@ -822,7 +944,7 @@
           x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
         }
       }
-      this._drawRocket(x, this.px, this.py, this.tilt, 1, this.phase !== "flight" || (this.bot ? this._botHold : this.holding) && this.fuel > 0);
+      this._drawRocket(x, this.px, this.py, this.tilt, 1, (this.phase === "climb" || this.phase === "pitch" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
     } else this._drawCrash(x);
     this._drawDeployFx(x);
     // FX sparks
@@ -925,6 +1047,30 @@
     x.restore();
   };
 
+  /* ---- first-flight overlay (art still; runtime dims + tip) ---- */
+  P._drawTutorial = function (x) {
+    if (this.phase !== "tutorial") return;
+    const im = this._get("tutorial/FT-first-flight-overlay.png");
+    x.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // soft dim
+    x.fillStyle = "rgba(0,0,0,0.26)"; x.fillRect(0, 0, this.cssW, this.cssH);
+    if (im) {
+      // cover play band (letterbox-aware)
+      const bw = this.viewW * this.s, bh = this.bandH;
+      const bx = (this.cssW - bw) / 2, by = this.oy;
+      x.imageSmoothingEnabled = true;
+      x.globalAlpha = 0.92;
+      x.drawImage(im, bx, by, bw, bh);
+      x.globalAlpha = 1; x.imageSmoothingEnabled = false;
+    }
+    // pulsing tip (art has tip; reinforce for phone)
+    const pulse = 0.7 + 0.3 * Math.sin(this.t * Math.PI * 2 * 1.2);
+    x.font = "bold " + Math.round(16 * this.hs) + "px 'DejaVu Sans', Verdana, sans-serif";
+    x.textAlign = "center"; x.textBaseline = "bottom";
+    x.fillStyle = "rgba(225,242,255," + pulse.toFixed(2) + ")";
+    x.fillText("tap screen to continue", this.cssW / 2, this.cssH - 18 - (this.letterbox ? 4 : 0));
+    x.textAlign = "left";
+  };
   /* ---- HUD (canvas: chips, fuel bar, zone banner; deploy + pause are DOM buttons) ---- */
   P._chip = function (x, X, Y, W, H) {
     x.fillStyle = HUD.navy; x.fillRect(X, Y, W, H);
@@ -947,6 +1093,11 @@
     this._chip(x, cx0, 6, cw, 42);
     const ci = this._get("coin_f0.png"); if (ci) x.drawImage(ci, cx0 + 10, 14, 25, 26);
     x.fillStyle = HUD.text; x.fillText(this._hud.coinsS, cx0 + 44, 28);
+    // phase chip — endless flight shows FLIGHT (never GROUNDED)
+    const phaseLabel = (this.phase === "tutorial") ? "HOW TO FLY" : (this.phase === "practice") ? "PRACTICE" : "FLIGHT";
+    const plW = Math.max(100, x.measureText(phaseLabel).width + 28);
+    const plX = cx0 + cw + 8;
+    this._chip(x, plX, 6, plW, 42); x.fillStyle = HUD.text; x.fillText(phaseLabel, plX + 14, 28);
     // fuel bar: 10 segments, green > 35 % > amber > 15 % > red
     this._chip(x, 6, 56, 200, 34);
     const fi = this._get("fuel.png"); if (fi) x.drawImage(fi, 14, 61, 17, 24);
@@ -959,7 +1110,7 @@
     }
     // zone banner: in 0.25 s / hold 1.5 s / out 0.25 s
     const bt = this.t - this.bannerT;
-    if (bt >= 0 && bt < 2 && this.phase === "flight") {
+    if (bt >= 0 && bt < 2 && this.phase === "flight" && this.hazardsOn) {
       const a = bt < 0.25 ? bt / 0.25 : bt > 1.75 ? (2 - bt) / 0.25 : 1;
       const Z = ZONES[this.bannerZone];
       const label = BANNERS[this.bannerZone];

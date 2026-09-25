@@ -38,3 +38,11 @@ Live `rocketbay-game.web.app` remains **audio1**. Only preview channel `flight` 
 - Global `user-select: none` + `-webkit-touch-callout: none` + transparent tap highlight on html/body/stage/chrome/flight UI; text fields (`#fbCard` textarea/input, `#nameCard` input) keep `user-select: text`.
 - `selectstart`/`dragstart` prevented outside editables; `touchstart`/`mousedown` `preventDefault` on `#flightCanvas` only (tray + assemble tap-to-swap untouched).
 - Build label: `flight1b`. Evidence: `coe-playtest/flight-v1/select-fix/`.
+
+
+## flight2 (preview channel `flight`, staged only — NO live)
+APP_VER **flight2**. flight-pack **v1.3.2-anywhere-density**.
+- HUD: canvas phase chip **FLIGHT** (never GROUNDED in endless flight); pad may still show GROUNDED.
+- First-run tutorial (`tutorial/FT-first-flight-overlay.png`): hold mid → overlay → tap → ~4s practice → hazards. Flag `rb_ft_tutorial_seen`. `?tutorial=1|0` override.
+- Spawn: continuous Y anywhere (excl. HUD/chrome); soft mid bias only; rate+density progression; unpredictability_lock (varied gaps/mix/timing, no mirrored walls).
+- Meteors: `hazard-meteor.png` from the right; rate rises with depth. Escape-gap + spread/cluster + debris retained.

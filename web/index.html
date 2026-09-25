@@ -398,15 +398,15 @@
 
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=audio1"></script>
-  <script src="audio.js?v=flight1b"></script>
-  <script src="liftoff.js?v=flight1b"></script>
-  <script src="flight.js?v=flight1b"></script>
+  <script src="audio.js?v=flight2"></script>
+  <script src="liftoff.js?v=flight2"></script>
+  <script src="flight.js?v=flight2"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "audio1";
     const PAD_VER = "pad5";
-    const APP_VER = "flight1b";
+    const APP_VER = "flight2";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -958,12 +958,17 @@
       chromeEl.classList.toggle("liftoffHidden", p === "liftoff");
       const fb = !!state.flightBackdrop && (p === "flight" || p === "result");
       todRow.style.display = (p === "liftoff" || p === "grounded" || fb) ? "none" : "";
-      meta.style.display = (p === "liftoff" || p === "assemble") ? "none" : "";
-      $("hud").style.display = (p === "liftoff" || p === "grounded" || p === "assemble") ? "none" : "";
+      meta.style.display = (p === "liftoff" || p === "assemble" || p === "flight" || p === "result") ? "none" : "";
+      // Pad DOM HUD only on pad/mission-ops; endless flight uses canvas HUD (FLIGHT chip)
+      $("hud").style.display = (p === "liftoff" || p === "grounded" || p === "assemble" || p === "flight" || p === "result") ? "none" : "";
       $("fbBtn").classList.toggle("on", p === "assemble" || p === "result");
       if (p !== "assemble") hideHint();
       document.body.classList.toggle("inFlight", p === "flight" || p === "result");
-      phaseHud.textContent = p.toUpperCase();
+      // Endless flight label is FLIGHT (never GROUNDED). Pad may still show GROUNDED.
+      const PHASE_LABEL = { assemble: "ASSEMBLE", grounded: "GROUNDED", liftoff: "LIFTOFF", flight: "FLIGHT", result: "RESULT" };
+      phaseHud.textContent = PHASE_LABEL[p] || p.toUpperCase();
+      if (p === "flight" || p === "result") meta.textContent = TODS[state.todIndex].id + " " + TODS[state.todIndex].label + " \u00b7 FLIGHT \u00b7 modular build";
+      else if (p === "grounded") meta.textContent = TODS[state.todIndex].id + " " + TODS[state.todIndex].label + " \u00b7 GROUNDED \u00b7 modular build";
       stackHud.textContent = KIT ? (idsOf(state.build).map(lbl).join(" + ") || "\u2014") : "";
       launchBtn.disabled = !(KIT && isComplete(state.build) && !validate(state.build, 0));
       plateWrap.classList.toggle("liftoffClimb", p === "liftoff" || fb);
@@ -1155,7 +1160,16 @@
       const seed = QS.has("capture") || QS.has("seed") ? ((+QS.get("seed") || 7) + (retry ? runSeq : 0)) : ((Date.now() ^ (Math.random() * 1e9)) >>> 0);
       runSeq++;
       if (liftoffEngine && liftoffEngine.audio && soundOn && !QS.has("capture")) { try { liftoffEngine.audio.ctx.resume(); } catch (_) {} }
-      f.start({ sprites, tod: TODS[state.todIndex].id, seed, bot: window.__flightBot || buildBotCfg() });
+      // First-run tutorial (localStorage); ?tutorial=1 force, ?tutorial=0 skip
+      const seen = LS.get("rb_ft_tutorial_seen") === "1";
+      const forceTut = QS.get("tutorial") === "1";
+      const skipTut = QS.get("tutorial") === "0" || !!retry;
+      const showTut = forceTut || (!skipTut && !seen);
+      f.o.onTutorialDone = () => { LS.set("rb_ft_tutorial_seen", "1"); };
+      f.start({
+        sprites, tod: TODS[state.todIndex].id, seed, bot: window.__flightBot || buildBotCfg(),
+        tutorial: showTut,
+      });
       window.__flightInfo = { mode: sprites.mode, packKey: sprites.packKey, chain: f.chain.map((n) => [+n.x.toFixed(1), +n.y.toFixed(1), +n.r.toFixed(1)]), seed };
       flDeploy.classList.add("on"); flPause.classList.add("on");
       updateDeployBtn();
