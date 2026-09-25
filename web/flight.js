@@ -1319,7 +1319,7 @@
     const thrusting = !seamHoldFlame && (this.phase === "climb" || this.phase === "pitch" || this.phase === "settle");
     let plume = seamHoldFlame ? 0
       : this.phase === "climb" ? CLIMB_PLUME
-      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.35 * clamp(this.phaseT / SETTLE_T, 0, 1)))
+      : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.22 * clamp(this.phaseT / SETTLE_T, 0, 1)))
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
     if (!seamHoldFlame && this._seamMorphT0 != null) {
       const mu = clamp((this.t - this._seamMorphT0) / (this._seamMorphDur || 0.55), 0, 1);
@@ -1597,34 +1597,37 @@
     const ps = plumeScale || 1;
     const nos = (this.sp && this.sp.nozzles && this.sp.nozzles.length) ? this.sp.nozzles : [{ y: 0, s: 1 }];
     const fl = (Math.floor(this.t * 30) % 3);
-    // v6b5 morph: pixel-cell plume (not stub rects) while scale is boosted — warmPx continuity
+    // v6b5: during seam morph / high plumeScale, tapered flicker bands (no hatch stub)
     const morph = this._seamMorphT0 != null
       ? (1 - clamp(this._seamMorphU != null ? this._seamMorphU : 0, 0, 1)) : 0;
-    const organic = morph > 0.04 || ps > 2.2;
+    const seamSettle = this.phase === "settle" && this.cfg && this.cfg.seamFromPad;
+    const organic = morph > 0.02 || (seamSettle && ps > 1.6);
     for (let i = 0; i < nos.length; i++) {
-      const n = nos[i], y = n.y, sc = (n.s || 1) * Math.min(ps, organic ? ps : 1);
-      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1) * (organic ? (1.05 + 0.7 * morph) : 1);
-      const hw = Math.max(4, 6 * sc), hh = Math.max(3, 5 * sc);
+      const n = nos[i], y = n.y, sc = (n.s || 1) * ps;
+      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1) * (organic ? (1.08 + 0.55 * morph) : 1);
+      const hw0 = Math.max(4, 6 * sc), hh = Math.max(3, 5 * sc);
       if (organic) {
-        // Cellular-ish: small squares along tapered length (reads closer to pad FX than big lobes)
-        const cell = Math.max(2, Math.round(2 + 2 * morph));
-        const cols = Math.max(6, Math.round((hw * (1.3 + 1.1 * morph)) / cell));
-        const rows = Math.max(10, Math.round(L / cell));
-        const seed = (Math.floor(this.t * 37) + i * 17) | 0;
-        for (let r = 0; r < rows; r++) {
-          const u = r / (rows - 1);
-          const half = Math.max(1, Math.round(cols * (1 - u * (0.55 + 0.3 * morph)) * 0.5));
-          const xBase = tailX - (r + 1) * cell;
-          for (let c = -half; c <= half; c++) {
-            const h = (seed + r * 31 + c * 17) & 255;
-            if (h < 40 + u * 70) continue; // sparse breakup toward tip
-            const heat = 1 - u * 0.85 - Math.abs(c) / (half + 1) * 0.35;
-            x.fillStyle = heat > 0.75 ? "#FFF8D0" : heat > 0.55 ? "#FFDE40" : heat > 0.32 ? "#FF8C1C" : "#D6301C";
-            x.fillRect(xBase + ((h % 3) - 1), y + c * cell, cell, cell);
+        const bands = 7;
+        const flicker = ((Math.floor(this.t * 41 + i * 9) % 5) - 2);
+        for (let b = 0; b < bands; b++) {
+          const u = b / (bands - 1);
+          const segL = L * (1 - u) / bands + L / bands;
+          const x1 = tailX - L * (u + 1 / bands);
+          const x0 = tailX - L * u;
+          const w = Math.max(2, (x0 - x1));
+          const half = hw0 * (1.15 - 0.75 * u) * (1 + 0.25 * morph);
+          const j = flicker * (0.4 + u);
+          x.fillStyle = u < 0.18 ? "#FFF8D0" : u < 0.38 ? "#FFDE40" : u < 0.62 ? "#FF8C1C" : "#D6301C";
+          x.fillRect(x1, y - half + j, w, half * 2);
+          // soft edge nibble (breaks hard rectangle silhouette)
+          if (u > 0.2 && (b + fl) % 2 === 0) {
+            x.fillStyle = "rgba(214,48,28,0.5)";
+            x.fillRect(x1 - 2, y - half * 1.15 + j, Math.max(2, w * 0.35), half * 0.5);
+            x.fillRect(x1 + w * 0.4, y + half * 0.35 + j, Math.max(2, w * 0.4), half * 0.55);
           }
         }
       } else {
-        x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw, L, hw * 2);
+        x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0, L, hw0 * 2);
         x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
         x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
         if (ps > 1.6) {
