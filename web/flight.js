@@ -1,4 +1,4 @@
-/* RocketBay FLIGHT MODE v1 / bh1e (blackhole-v1 branch)
+/* RocketBay FLIGHT MODE v1 / flight2c live / bh1e (blackhole-v1)
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, +50% gravity over bh1d,
  * core-only hitbox, spin, soft 1/r^2 pull, swallow death (no crash boom on BH),
  * L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5; lab-only ~3 early burst.
