@@ -1,4 +1,5 @@
-/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-d1 deadly rims
+/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-d2 pickup+shield+settle
+ * GP1-BETA D2: coin pickup sparkle+trail; stronger shield oval + near-miss flash; settle streaks + ALT tick.
  * GP1-BETA D1: danger rim + hot tick on deadly hazards; decor planets never inherit rim.
  * GP1-BETA C2: cruise longer dual-layer exhaust + ~10° nose-up while thrusting (flight gameplay).
  * GP1-BETA s6b5: plume hold/morph + scenery crossfade across reveal; keep scale/lb/no-second-climb, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
@@ -48,6 +49,12 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
+  // gp1-d2 FX
+  const SHIELD_RX = ROCKET_LEN * 0.62, SHIELD_RY = 42; // stronger oval (phone-readable)
+  const NEARMISS_PAD = 28;                           // graze band outside hit radii
+  const NEARMISS_COOL = 0.45;                        // flash cooldown
+  const PICKUP_TRAIL_N = 4;                          // ≤4 gold trail dots
+  const ALT_TICK_S = 1.35;                           // ↑ ALT HUD tick on settle fade-in
   // BLACKHOLE v1 / bh1g (named tunables — CoE playtest; lab-only global pull + strong-G)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
   // Base size as-is at early depth; draw+pullR grow with depth (pullR = debug/vignette/spawn only).
@@ -212,7 +219,7 @@
     // pools
     this.haz = []; for (let i = 0; i < 160; i++) this.haz.push({ on: false, im: null, x: 0, y: 0, vx: 0, vy: 0, r: 0, dw: 0, dh: 0, ox: 0, oy: 0, par: 1, kind: 0, rot: 0 });
     this.pick = []; for (let i = 0; i < 220; i++) this.pick.push({ on: false, kind: 0, x: 0, y: 0, r: 0, ph: 0, im: null, dw: 0, dh: 0, ox: 0, oy: 0 });
-    this.fx = []; for (let i = 0; i < 90; i++) this.fx.push({ on: false, kind: 0, x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 0, c: 0 });
+    this.fx = []; for (let i = 0; i < 120; i++) this.fx.push({ on: false, kind: 0, x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 0, c: 0, ang: 0, sc: 1 });
     this.decor = []; for (let i = 0; i < 24; i++) this.decor.push({ on: false, im: null, x: 0, y: 0, par: 0.5, w: 0, h: 0 });
     this.dust = []; for (let i = 0; i < 18; i++) this.dust.push({ x: 0, y: 0 });
     this.nodesW = []; for (let i = 0; i < 7; i++) this.nodesW.push({ x: 0, y: 0, r: 0 });
@@ -235,7 +242,7 @@
   P.preload = function (tod) {
     const core = ["climb-bridge-" + tod + ".png", "bg-orbit-edge-tile.png", "earth-limb.png", "parallax/far-stars-tile.png",
       "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png",
-      "hazard-meteor.png", "hazard-blackhole.png", "tutorial/FT-first-flight-overlay.png"];
+      "hazard-meteor.png", "hazard-blackhole.png", "tutorial/FT-first-flight-overlay.png", "fx/sparkle.png", "fx/shield-oval.png", "fx/nearmiss-flash.png"];
     for (let i = 0; i < 5; i++) core.push("coin_f" + i + ".png", "asteroid_" + i + ".png");
     this._padSrc = this.o.padPlate ? this.o.padPlate(tod) : null;
     const p = this._need(core);
@@ -291,7 +298,7 @@
     this.camZoom = SEAM_ZOOM0; this.lbA = 0; this.climbExit = 0; // continuous seam camera
     this.px = 640; this.py = 430; this.vy = 0; this.tilt = -Math.PI / 2; this.holding = false; this._botHold = false;
     this.fuel = 1; this.coins = 0; this.deployed = false; this.deployKm = 0; this.bonus = 0; this.deployT = -1;
-    this.crashed = false; this.crashT = 0; this.deathKind = null; this.swallowScale = 1; this.swallowBh = null; this.shield = false; this.shieldGrace = 0; this.magnetT = 0;
+    this.crashed = false; this.crashT = 0; this.deathKind = null; this.swallowScale = 1; this.swallowBh = null; this.shield = false; this.shieldGrace = 0; this.magnetT = 0; this._nearMissT = 0; this._altTickT = -1; this._altTickArmed = false;
     this.nextGateX = 900; this.gateN = 0; this.lastGapC = 360; this.nextExtraX = 1200;
     this.planetBlock = { top0: 0, top1: -1, topY: 0, bot0: 0, bot1: -1, botY: 720 };
     this.zoneIdx = 0; this.bannerT = -10; this.bannerZone = 0; this.comet = { on: false, x: 0, y: 0 }; this.cometZone = -1;
@@ -505,11 +512,15 @@
       this.cam += this.speed * dt;
       this.bodyY = 720;
       // v6b: NEVER pop FLIGHT HUD with the canvas swap — wait until after snap reveal + beat.
+      const wasHud = this._hudOn;
       if (this.cfg && this.cfg.seamFromPad) {
         if (this._seamRevealed && this.phaseT >= (this._settleDur || SETTLE_T) * 0.75) this._hudOn = true;
       } else if (this.camZoom <= HUD_ZOOM_ON) {
         this._hudOn = true;
       }
+      // gp1-d2: arm ↑ ALT tick once when settle HUD fades in
+      if (this._hudOn && !wasHud) { this._altTickT = 0; this._altTickArmed = true; }
+      if (this._altTickArmed && this._altTickT >= 0) this._altTickT += dt;
       this._notifyHud();
       if (this.phaseT >= (this._settleDur || SETTLE_T)) {
         this.phase = "pitch"; this.phaseT = 0;
@@ -654,11 +665,17 @@
     const k = TILT_RATE * (light ? LIGHT_TILT : 1) * (thrusting ? 1 : 1.35);
     this.tilt += (tt - this.tilt) * Math.min(1, k * dt);
     if (this.shieldGrace > 0) this.shieldGrace -= dt;
+    if (this._nearMissT > 0) this._nearMissT -= dt;
+    if (this._altTickArmed && this._altTickT >= 0 && this.phase !== "settle") {
+      this._altTickT += dt;
+      if (this._altTickT > ALT_TICK_S) { this._altTickArmed = false; this._altTickT = -1; }
+    }
     if (this.magnetT > 0) this.magnetT -= dt;
     // earth limb drops out over 0-600 km; zone edge bodies slide per zone
     this._spawn();
     this._stepObjects(dt);
     this._collide();
+    this._nearMissCheck();
     // zone banner (zone index follows the art strip so the banner lands at the transition's end)
     const U = this._artU(), z = Math.floor(U / SEG);
     if (z !== this.zoneIdx) { this.zoneIdx = z; this.bannerT = this.t; this.bannerZone = mod(z, 6); this.cometZone = -1; }
@@ -1117,11 +1134,55 @@
   };
   P._spark = function (x, y, c, n, spd) {
     for (let k = 0; k < n; k++) {
-      let f = null; for (let i = 0; i < this.fx.length; i++) if (!this.fx[i].on) { f = this.fx[i]; break; }
-      if (!f) return;
+      const f = this._allocFx(); if (!f) return;
       const a = this._rand() * Math.PI * 2, v = spd * (0.4 + this._rand() * 0.6);
-      f.on = true; f.kind = 0; f.x = x; f.y = y; f.vx = Math.cos(a) * v; f.vy = Math.sin(a) * v; f.t = 0; f.life = 0.35 + this._rand() * 0.25; f.c = c;
+      f.on = true; f.kind = 0; f.x = x; f.y = y; f.vx = Math.cos(a) * v; f.vy = Math.sin(a) * v; f.t = 0; f.life = 0.35 + this._rand() * 0.25; f.c = c; f.ang = 0; f.sc = 1;
     }
+  };
+  P._allocFx = function () {
+    for (let i = 0; i < this.fx.length; i++) if (!this.fx[i].on) return this.fx[i];
+    return null;
+  };
+  // gp1-d2: coin pickup sparkle burst + short gold trail (≤4 dots)
+  P._pickupPop = function (x, y) {
+    const pop = this._allocFx();
+    if (pop) {
+      pop.on = true; pop.kind = 1; pop.x = x; pop.y = y; pop.vx = 0; pop.vy = -18;
+      pop.t = 0; pop.life = 0.42; pop.c = 0; pop.ang = 0; pop.sc = 1.35;
+    }
+    for (let k = 0; k < PICKUP_TRAIL_N; k++) {
+      const f = this._allocFx(); if (!f) break;
+      f.on = true; f.kind = 2; f.x = x - 10 - k * 9; f.y = y + (k % 2 ? 3 : -3);
+      f.vx = -40 - k * 12; f.vy = (k % 2 ? 1 : -1) * 18;
+      f.t = 0; f.life = 0.28 + k * 0.05; f.c = 0; f.ang = 0; f.sc = 1 - k * 0.12;
+    }
+    this._spark(x, y, 0, 5, 120);
+  };
+  // gp1-d2: near-miss flash when hazard grazes shield bubble (≠ hit/death)
+  P._nearMissCheck = function () {
+    if (!this.shield || this.crashed || this.shieldGrace > 0) return;
+    if (this._nearMissT > 0) return;
+    const cam = this.cam, rx = SHIELD_RX, ry = SHIELD_RY;
+    let best = null, bestD = 1e9, bestHx = 0, bestHy = 0;
+    for (let j = 0; j < this.haz.length; j++) {
+      const h = this.haz[j]; if (!h.on || h.kind === 3) continue;
+      const hx = h.x - cam * h.par, hy = h.y;
+      const dx = hx - this.px, dy = hy - this.py;
+      const nx = dx / (rx + h.r), ny = dy / (ry + h.r);
+      const e = Math.sqrt(nx * nx + ny * ny);
+      const outer = 1 + NEARMISS_PAD / Math.max(rx, ry);
+      if (e >= 0.92 && e <= outer && e < bestD) {
+        bestD = e; best = h; bestHx = hx; bestHy = hy;
+      }
+    }
+    if (!best) return;
+    this._nearMissT = NEARMISS_COOL;
+    const f = this._allocFx(); if (!f) return;
+    const ang = Math.atan2(bestHy - this.py, bestHx - this.px);
+    f.on = true; f.kind = 3;
+    f.x = this.px + Math.cos(ang) * rx * 0.92;
+    f.y = this.py + Math.sin(ang) * ry * 0.92;
+    f.vx = 0; f.vy = 0; f.t = 0; f.life = 0.28; f.c = 0; f.ang = ang; f.sc = 1;
   };
 
   P._playerNodes = function () {
@@ -1165,12 +1226,11 @@
         const n = N[i], dx = n.x - pxs, dy = n.y - p.y, rr = n.r + p.r;
         if (dx * dx + dy * dy < rr * rr) {
           p.on = false;
-          if (p.kind === 0) this.coins = Math.min(100000, this.coins + 1);
-          else if (p.kind === 1) this.fuel = Math.min(1, this.fuel + FUEL_REFILL);
-          else if (p.kind === 2) this.shield = true;
-          else if (p.kind === 3) this.magnetT = MAGNET_S;
-          else this.coins = Math.min(100000, this.coins + GEM_COINS);
-          this._spark(pxs, p.y, p.kind === 1 ? 2 : 0, 6, 140);
+          if (p.kind === 0) { this.coins = Math.min(100000, this.coins + 1); this._pickupPop(pxs, p.y); }
+          else if (p.kind === 1) { this.fuel = Math.min(1, this.fuel + FUEL_REFILL); this._spark(pxs, p.y, 2, 6, 140); }
+          else if (p.kind === 2) { this.shield = true; this._spark(pxs, p.y, 1, 6, 140); }
+          else if (p.kind === 3) { this.magnetT = MAGNET_S; this._spark(pxs, p.y, 0, 6, 140); }
+          else { this.coins = Math.min(100000, this.coins + GEM_COINS); this._pickupPop(pxs, p.y); }
           break;
         }
       }
@@ -1413,6 +1473,24 @@
       for (let sx = -off; sx < VW; sx += 1280) x.drawImage(st, sx, 0);
       x.globalAlpha = 1;
     }
+    // gp1-d2: vertical star-streaks during settle zoom (motion cue; no second liftoff)
+    if (this.phase === "settle" && this._seamRevealed) {
+      const u = clamp(this.phaseT / (this._settleDur || SETTLE_T), 0, 1);
+      const len = 10 + 28 * (1 - u); // length eases as zoom settles
+      x.save();
+      x.strokeStyle = "rgba(220,235,255,0.55)";
+      x.lineWidth = 1;
+      // deterministic pseudo-stars from seed-ish positions
+      for (let i = 0; i < 18; i++) {
+        const sx = ((i * 137 + Math.floor(this.t * 40)) % Math.max(1, Math.floor(VW))) ;
+        const sy = (i * 97 + Math.floor(cam * 0.05)) % WORLD_H;
+        x.beginPath();
+        x.moveTo(sx, sy - len);
+        x.lineTo(sx, sy + 2);
+        x.stroke();
+      }
+      x.restore();
+    }
     // 3) zone edge body (x fixed): earth limb rises in the pitch-over and drops out over 0-600 km
     this._drawBody(x);
     // 4) set-piece comet (far layer, own velocity)
@@ -1485,6 +1563,15 @@
       const sx = p.x - cam; if (sx < -60 || sx > VW + 60) continue;
       if (p.kind === 0) {
         const f = Math.floor(p.ph) % 5, m = SPR["coin_f" + f], im = this._get(COIN_IMG[f]); if (!im) continue;
+        // gp1-d2: short gold trail (≤4 dots) so coins read alive vs static
+        x.fillStyle = "rgba(255,227,106,0.7)";
+        for (let k = 1; k <= PICKUP_TRAIL_N; k++) {
+          const d = 5 + k * 6, sz = 3 - (k >> 1);
+          if (sz < 1) continue;
+          x.globalAlpha = 0.55 - k * 0.1;
+          x.fillRect(Math.round(sx - d) - sz, Math.round(p.y + Math.sin(p.ph + k) * 1.5) - sz, sz * 2, sz * 2);
+        }
+        x.globalAlpha = 1;
         x.drawImage(im, Math.round(sx - m[2] * p.sc), Math.round(p.y - m[3] * p.sc), Math.round(m[0] * p.sc), Math.round(m[1] * p.sc));
       } else {
         const im = this._get(p.im); if (!im) continue;
@@ -1498,8 +1585,24 @@
       if (!this.crashed) {
         if (this.shield || this.shieldGrace > 0) {
           if (!(this.shieldGrace > 0 && Math.floor(this.t * 12) % 2)) {
-            x.strokeStyle = "rgba(120,220,255,0.8)"; x.lineWidth = 3;
-            x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
+            // gp1-d2: stronger cyan oval (architect fx/shield-oval.png) — phone-readable
+            const oval = this._get("fx/shield-oval.png");
+            x.save();
+            x.translate(this.px, this.py);
+            x.rotate(this.tilt);
+            x.imageSmoothingEnabled = false;
+            if (oval) {
+              const ow = SHIELD_RX * 2, oh = SHIELD_RY * 2;
+              x.globalAlpha = 0.95;
+              x.drawImage(oval, Math.round(-ow / 2), Math.round(-oh / 2), Math.round(ow), Math.round(oh));
+              x.globalAlpha = 1;
+            } else {
+              x.strokeStyle = "rgba(80,220,255,0.95)"; x.lineWidth = 4;
+              x.beginPath(); x.ellipse(0, 0, SHIELD_RX, SHIELD_RY, 0, 0, Math.PI * 2); x.stroke();
+              x.strokeStyle = "rgba(140,240,255,0.45)"; x.lineWidth = 2;
+              x.beginPath(); x.ellipse(0, 0, SHIELD_RX * 0.92, SHIELD_RY * 0.92, 0, 0, Math.PI * 2); x.stroke();
+            }
+            x.restore();
           }
         }
         const seamHoldFlame = this.phase === "settle" && this._seamSuppressFlame;
@@ -1533,11 +1636,50 @@
         }
       } else this._drawCrash(x);
       this._drawDeployFx(x);
-      // FX sparks
+      // FX: sparks + gp1-d2 sparkle / trail / near-miss
       for (let i = 0; i < this.fx.length; i++) {
         const f = this.fx[i]; if (!f.on) continue;
-        x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
-        x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+        const u = f.life > 0 ? clamp(f.t / f.life, 0, 1) : 1;
+        if (f.kind === 1) {
+          // sparkle burst (pickup pop)
+          const im = this._get("fx/sparkle.png");
+          const sc = (f.sc || 1) * (1.15 - 0.55 * u);
+          const a = 1 - u * u;
+          x.save(); x.globalAlpha = a; x.imageSmoothingEnabled = false;
+          if (im) {
+            const s = 20 * sc;
+            x.drawImage(im, Math.round(f.x - s / 2), Math.round(f.y - s / 2), Math.round(s), Math.round(s));
+          } else {
+            x.fillStyle = "#fff8c8";
+            x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+          }
+          x.restore();
+        } else if (f.kind === 2) {
+          // short gold trail dots (≤4)
+          const sz = Math.max(2, Math.round(4 * (f.sc || 1) * (1 - u * 0.5)));
+          x.globalAlpha = 1 - u;
+          x.fillStyle = "#ffe36a";
+          x.fillRect(Math.round(f.x) - (sz >> 1), Math.round(f.y) - (sz >> 1), sz, sz);
+          x.globalAlpha = 1;
+        } else if (f.kind === 3) {
+          // near-miss flash arc toward hazard (≠ death)
+          const im = this._get("fx/nearmiss-flash.png");
+          x.save();
+          x.translate(f.x, f.y);
+          x.rotate(f.ang || 0);
+          x.globalAlpha = 1 - u;
+          x.imageSmoothingEnabled = false;
+          if (im) {
+            x.drawImage(im, -50, -35, 100, 70);
+          } else {
+            x.strokeStyle = "rgba(255,255,200,0.95)"; x.lineWidth = 3;
+            x.beginPath(); x.arc(0, 0, 36, -0.9, 0.9); x.stroke();
+          }
+          x.restore();
+        } else {
+          x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
+          x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+        }
       }
       // BH pull cue: dark vignette + purple/blue swirl (NOT brown/orange dirt wash) — soft-R scoped
       if (this._bhInPull && !this.crashed) this._drawBhPullVfx(x, VW);
@@ -1879,6 +2021,20 @@
     x.font = "bold 22px 'DejaVu Sans', 'Verdana', sans-serif"; x.textBaseline = "middle"; x.textAlign = "left";
     const kmW = Math.max(150, x.measureText(this._hud.kmS).width + 34);
     this._chip(x, 6, 6, kmW, 42); x.fillStyle = HUD.text; x.fillText(this._hud.kmS, 22, 28);
+    // gp1-d2: ↑ ALT tick when settle HUD fades in
+    if (this._altTickArmed && this._altTickT >= 0 && this._altTickT < ALT_TICK_S) {
+      const a = this._altTickT < 0.15 ? this._altTickT / 0.15
+        : this._altTickT > ALT_TICK_S - 0.25 ? (ALT_TICK_S - this._altTickT) / 0.25 : 1;
+      x.save();
+      x.globalAlpha = clamp(a, 0, 1);
+      x.fillStyle = "#3DFF7A";
+      x.fillRect(6, -18, 64, 20);
+      x.fillStyle = "#0A1C3A";
+      x.font = "bold 14px 'DejaVu Sans', 'Verdana', sans-serif";
+      x.textBaseline = "middle";
+      x.fillText("\u2191 ALT", 14, -8);
+      x.restore();
+    }
     const cx0 = 6 + kmW + 8, cw = Math.max(96, x.measureText(this._hud.coinsS).width + 70);
     this._chip(x, cx0, 6, cw, 42);
     const ci = this._get("coin_f0.png"); if (ci) x.drawImage(ci, cx0 + 10, 14, 25, 26);
