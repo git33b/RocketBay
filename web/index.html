@@ -313,13 +313,16 @@
     .flBtn.on { display: flex; }
     #flDeploy img { image-rendering: pixelated; height: 60%; }
     #flDeploy.ready { background: #123E6E; animation: rbBlink .5s steps(1) infinite; }
-    #flDeploy.disabled { border-color: #5b6470; background: rgba(40,44,52,.75); color: #8a929c; box-shadow: none; }
-    #flDeploy.disabled img, #flDeploy.used img { filter: grayscale(1) brightness(.8); }
-    #flDeploy.used { opacity: .7; } #flDeploy .ck { color: #5CFF7A; } #flDeploy .lk { font-size: .8em; }
-    /* gp1 chrome tax: locked DEPLOY = icon-only compact; full when ready/used */
-    #flDeploy.disabled { gap: 0; padding: 0; min-width: 0; }
-    #flDeploy.disabled .t { display: none; }
-    #flDeploy.disabled img { height: 70%; }
+    #flDeploy.disabled { border-color: #3a4048; background: rgba(18,20,26,.88); color: #6a727c; box-shadow: none;
+      filter: saturate(.35) brightness(.72); gap: 2px; padding: 4px 6px; min-width: 0; flex-direction: column; }
+    #flDeploy.disabled img { display: none; }
+    #flDeploy.used img { filter: grayscale(1) brightness(.8); }
+    #flDeploy.used { opacity: .7; } #flDeploy .ck { color: #5CFF7A; }
+    /* gp1-beta B2: locked DEPLOY = muted lock glyph + LOCKED (not a primary CTA) */
+    #flDeploy.disabled .t { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      font-size: 9px; letter-spacing: .08em; font-weight: 800; color: #7a828c; line-height: 1; }
+    #flDeploy.disabled .lk { display: block; width: 18px; height: 20px; }
+    #flDeploy.disabled .lk svg { display: block; width: 100%; height: 100%; }
     #fbBtn { opacity: .72; transform: scale(0.92); transform-origin: top right; }
     @keyframes rbBlink { 0% { outline: 1px solid #A0EBFF; outline-offset: 1px; } 50% { outline: 0 solid transparent; } }
     #flPause { font-size: 18px; }
@@ -473,7 +476,7 @@
   <script src="modular.js?v=gp1-beta-s6b5c"></script>
   <script src="audio.js?v=gp1-beta-s6b5c"></script>
   <script src="liftoff.js?v=gp1-beta-s6b5c"></script>
-  <script src="flight.js?v=gp1-beta-s6b5c"></script>
+  <script src="flight.js?v=gp1-beta-b2"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -481,7 +484,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-b1";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-b2";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
     // Phase B1: PART-STATS → ATTRS (Weight←mass, Speed←thrust, Agility←stability/agility)
@@ -1121,7 +1124,7 @@
       const fb = !!state.flightBackdrop && (p === "flight" || p === "result");
       todRow.style.display = (p === "liftoff" || p === "grounded" || fb) ? "none" : "";
       meta.style.display = (p === "liftoff" || p === "assemble" || p === "flight" || p === "result") ? "none" : "";
-      // Pad DOM HUD only on pad/mission-ops; endless flight uses canvas HUD (FLIGHT chip)
+      // Pad DOM HUD only on pad/mission-ops; endless flight uses canvas HUD (B2: no FLIGHT chip)
       $("hud").style.display = (p === "liftoff" || p === "grounded" || p === "assemble" || p === "flight" || p === "result") ? "none" : "";
       $("fbBtn").classList.toggle("on", p === "assemble" || p === "result");
       if (p !== "assemble") hideHint();
@@ -1318,8 +1321,8 @@
       lastFlightLayout = L;
       const hs = L.hs, pw = Math.round(46 * hs);
       const locked = flDeploy.classList.contains("disabled");
-      const dw = Math.round((locked ? 56 : 190) * hs), dh = Math.round((locked ? 56 : 60) * hs);
-      Object.assign(flDeploy.style, { width: dw + "px", height: dh + "px", fontSize: Math.round((locked ? 14 : 22) * hs) + "px" });
+      const dw = Math.round((locked ? 64 : 190) * hs), dh = Math.round((locked ? 78 : 60) * hs);
+      Object.assign(flDeploy.style, { width: dw + "px", height: dh + "px", fontSize: Math.round((locked ? 10 : 22) * hs) + "px" });
       Object.assign(flPause.style, { width: pw + "px", height: pw + "px" });
       const m = Math.round(14 * hs);
       if (L.letterbox) { // portrait: controls live in the letterbox, outside the play band
@@ -1479,9 +1482,10 @@
       if (flDeploy.dataset.st === st) return;
       flDeploy.dataset.st = st;
       flDeploy.className = "flBtn on " + st;
-      // locked = icon-only (text hidden via CSS); ready/used show full label
-      flDeploy.querySelector(".t").innerHTML = st === "used" ? 'DEPLOYED<span class="ck">\u2713</span>' : st === "ready" ? "DEPLOY" : "";
-      flDeploy.setAttribute("aria-label", st === "used" ? "Payload deployed" : st === "ready" ? "Deploy payload" : "Deploy payload (available from 300 km)");
+      // locked = muted lock + LOCKED; ready/used show full label
+      const LOCK_SVG = '<span class="lk" aria-hidden="true"><svg viewBox="0 0 18 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3.5" y="9" width="11" height="9" rx="1.5" stroke="#8a929c" stroke-width="1.6"/><path d="M6 9V6.5a3 3 0 0 1 6 0V9" stroke="#8a929c" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="13.2" r="1.2" fill="#8a929c"/></svg></span>';
+      flDeploy.querySelector(".t").innerHTML = st === "used" ? 'DEPLOYED<span class="ck">\u2713</span>' : st === "ready" ? "DEPLOY" : (LOCK_SVG + "LOCKED");
+      flDeploy.setAttribute("aria-label", st === "used" ? "Payload deployed" : st === "ready" ? "Deploy payload" : "Deploy locked (available from 300 km)");
       if (lastFlightLayout) layoutFlightUi(lastFlightLayout);
     }
     // Kill browser text selection / callouts on taps (keep chrome tray scrollable)

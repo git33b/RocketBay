@@ -1766,11 +1766,13 @@
     this._chip(x, cx0, 6, cw, 42);
     const ci = this._get("coin_f0.png"); if (ci) x.drawImage(ci, cx0 + 10, 14, 25, 26);
     x.fillStyle = HUD.text; x.fillText(this._hud.coinsS, cx0 + 44, 28);
-    // phase chip — endless flight shows FLIGHT (never GROUNDED)
-    const phaseLabel = (this.phase === "tutorial") ? "HOW TO FLY" : (this.phase === "practice") ? "PRACTICE" : "FLIGHT";
-    const plW = Math.max(100, x.measureText(phaseLabel).width + 28);
-    const plX = cx0 + cw + 8;
-    this._chip(x, plX, 6, plW, 42); x.fillStyle = HUD.text; x.fillText(phaseLabel, plX + 14, 28);
+    // gp1-beta B2: strip FLIGHT status glass (tutorial/practice chips kept)
+    const phaseLabel = (this.phase === "tutorial") ? "HOW TO FLY" : (this.phase === "practice") ? "PRACTICE" : null;
+    if (phaseLabel) {
+      const plW = Math.max(100, x.measureText(phaseLabel).width + 28);
+      const plX = cx0 + cw + 8;
+      this._chip(x, plX, 6, plW, 42); x.fillStyle = HUD.text; x.fillText(phaseLabel, plX + 14, 28);
+    }
     // fuel bar: 10 segments, green > 35 % > amber > 15 % > red
     this._chip(x, 6, 56, 200, 34);
     const fi = this._get("fuel.png"); if (fi) x.drawImage(fi, 14, 61, 17, 24);
