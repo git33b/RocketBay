@@ -1,6 +1,6 @@
-/* RocketBay FLIGHT MODE v1 / flight2 (flight-v1 branch)
- * flight-pack-v1.3.2-anywhere-density: anywhere spawn, rate/density progression,
- * meteors from right, unpredictability_lock, first-flight tutorial.
+/* RocketBay FLIGHT MODE v1 / bh1 (blackhole-v1 branch)
+ * flight-pack-v1.3.2 + BLACKHOLE v1: rare gravity-well hazard, core-only hitbox,
+ * spin, soft 1/r^2 pull on player + lighter field pull on other hazards/meteors.
  * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
  * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
  * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
@@ -29,6 +29,15 @@
   const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
   const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
   const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
+  // BLACKHOLE v1 (named tunables — CoE playtest)
+  const BH_PULL_R = 240;                 // soft pull radius (design px); outside = free
+  const BH_G = 460000;                   // radial accel scale: a = BH_G / (r^2 + BH_SOFT)
+  const BH_SOFT = 3200;                  // softens singularity near core
+  const BH_OTHER = 0.32;                 // other deadly haz/meteors feel ~0.25–0.4× player pull
+  const BH_SPIN = 0.9;                   // rad/s continuous ring/arms spin (core hitbox unrotated)
+  const BH_DRAW_W = 104;                 // typical on-screen width
+  const BH_MIN_KM = 95;                  // L1 rare/absent until ~this depth (or phaseT gate)
+  const BH_GAP0 = 26, BH_GAP1 = 12;      // seconds between BH spawns (L1 → deep)
   const SIM_DT = 1 / 120;
   const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
   const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
@@ -54,7 +63,7 @@
   const DEBRIS_DRAW = { // typical draw widths from qa-flight-pack-v1.3-debris.json
     "hazard-station": 140, "hazard-telescope": 110, "hazard-satellite": 84,
     "hazard-wreckage_0": 70, "hazard-wreckage_1": 72, "hazard-wreckage_2": 64,
-    "hazard-meteor": 64,
+    "hazard-meteor": 64, "hazard-blackhole": 104,
   };
 
   const ZONES = [
@@ -84,6 +93,8 @@
     "hazard-wreckage_2": [71, 50, 33.0, 24.6, 16.2],
     // flight-pack-v1.3.2 meteor (rock body hitbox; fiery tail NON-colliding)
     "hazard-meteor": [64, 40, 22.0, 22.0, 12.0],
+    // BLACKHOLE v1: native 108×106; hitbox = dark CORE only (~r20); arms/ring NON-colliding
+    "hazard-blackhole": [108, 106, 54.0, 53.0, 20.0],
   };
   // pack deploy / crash frame sets (manifest flight-pack-v1.deploy / .crash; steel regenerated in v1.1)
   const PACK_STACKS = {
@@ -182,7 +193,7 @@
   P.preload = function (tod) {
     const core = ["climb-bridge-" + tod + ".png", "bg-orbit-edge-tile.png", "earth-limb.png", "parallax/far-stars-tile.png",
       "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png",
-      "hazard-meteor.png", "tutorial/FT-first-flight-overlay.png"];
+      "hazard-meteor.png", "hazard-blackhole.png", "tutorial/FT-first-flight-overlay.png"];
     for (let i = 0; i < 5; i++) core.push("coin_f" + i + ".png", "asteroid_" + i + ".png");
     this._padSrc = this.o.padPlate ? this.o.padPlate(tod) : null;
     const p = this._need(core);
@@ -200,7 +211,7 @@
       for (let i = 0; i < 4; i++) rest.push("parallax/decor-planets/z" + z + "-far-" + i + ".png");
     }
     for (let i = 0; i < 5; i++) rest.push("zones/ice-hazard-variants/asteroid_" + i + ".png");
-    ["hazard-station","hazard-telescope","hazard-satellite","hazard-wreckage_0","hazard-wreckage_1","hazard-wreckage_2","hazard-meteor"].forEach((n) => rest.push(n + ".png"));
+    ["hazard-station","hazard-telescope","hazard-satellite","hazard-wreckage_0","hazard-wreckage_1","hazard-wreckage_2","hazard-meteor","hazard-blackhole"].forEach((n) => rest.push(n + ".png"));
     let i = 0; const next = () => { if (i >= rest.length) return; const r = rest[i++]; this._get(r); this.img[r].p.then(next); };
     next(); next(); next();
   };
@@ -241,6 +252,7 @@
     this.tutorialDone = !this.wantTutorial;
     this.practiceT = 0; this.hazardsOn = !this.wantTutorial;
     this.nextMeteorAt = 0; this.meteorN = 0;
+    this.nextBhAt = 1e9; this.bhN = 0; this._bhInPull = false;
     this.lastGateSig = ""; this.gapJitter = 0;
     this.nextDecorX = 0; this.popT = -10; this.gameOverFired = false; this.result = null; this.events.length = 0;
     this.bodyY = 720; this.accum = 0; this.lastTs = 0; this.fps = []; this._flash = 0;
@@ -349,7 +361,7 @@
         this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this.py = 360; this.vy = 0;
         this.phaseT = 0; this._log("thrust", this.t, hold); this._lastHold = hold;
         if (this.wantTutorial) { this.phase = "tutorial"; this.hazardsOn = false; this.nextGateX = 1e9; this.speed = SPEED0 * 0.35; }
-        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; }
+        else { this.phase = "flight"; this.hazardsOn = true; this.speed = SPEED0; this.nextGateX = Math.max(this.nextGateX, this.cam + this.viewW * 0.45 + 120); this.nextMeteorAt = this.t + 2.0 + this._rand() * 1.5; this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.6 : 14 + this._rand() * 10); }
       }
       return;
     }
@@ -387,6 +399,7 @@
         this.phase = "flight"; this.phaseT = 0; this.hazardsOn = true;
         this.nextGateX = this.cam + this.viewW * 0.45 + 120;
         this.nextMeteorAt = this.t + 1.8 + this._rand() * 1.2;
+        this.nextBhAt = this.t + (this.cfg && this.cfg.forceBh ? 0.5 : 12 + this._rand() * 10);
         this._log("hazards", this.t);
       }
       return;
@@ -407,7 +420,8 @@
     if (thrusting !== this._lastHold) { this._lastHold = thrusting; this._log("thrust", this.t, thrusting); if (this.voice) { const a = this.o.getAudio(); this.voice.setThrust(thrusting, a.ctx.currentTime); } }
     const g = GRAVITY * (light ? LIGHT_GRAVITY : 1), th = THRUST * (light ? LIGHT_THRUST : 1);
     this.vy += (g - (thrusting ? th : 0)) * dt;
-    this.vy = clamp(this.vy, -VY_MAX, VY_MAX);
+    this._bhPullPlayer(dt);
+    this.vy = clamp(this.vy, -VY_MAX * 1.15, VY_MAX * 1.15);
     this.py += this.vy * dt;
     if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * (light ? LIGHT_FUEL : 1) * dt);
     const tt = (this.vy / VY_MAX) * TILT_MAX, k = TILT_RATE * (light ? LIGHT_TILT : 1);
@@ -452,6 +466,8 @@
     }
     try { this._spawnMeteors(); }
     catch (err) { if (typeof console !== "undefined") console.warn("[flight2b] meteor spawn", err); }
+    try { this._spawnBlackholes(); }
+    catch (err) { if (typeof console !== "undefined") console.warn("[bh1] blackhole spawn", err); }
   };
   // v1.3.2 meteors: spawn OFF the right edge, cross LEFT at 540–760 px/s screen-relative
   // (faster than scroll). Body hitbox only; fiery tail is non-colliding art.
@@ -476,7 +492,76 @@
       if (h) { h.rot = -0.35 - R() * 0.55; h.kind = 2; /* meteor mover */ this.meteorN++; }
     }
   };
-    P._hazard = function (name, x, y, drawW, par, vx, vy, zone) {
+
+  // BLACKHOLE v1: rare well ahead of the camera. Escape path = skirt above/below.
+  // Core-only death circle; arms/ring cosmetic + spinning. Soft 1/r^2 pull inside BH_PULL_R.
+  P._spawnBlackholes = function () {
+    if (this.t < this.nextBhAt) return;
+    const R = () => this._rand();
+    const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
+    const force = !!(this.cfg && this.cfg.forceBh);
+    // L1 rare/absent unless forced for evidence
+    if (!force && this.km() < BH_MIN_KM && this.phaseT < 18) {
+      this.nextBhAt = this.t + 4 + R() * 4;
+      return;
+    }
+    // only one active BH at a time (keeps escape readable)
+    for (let i = 0; i < this.haz.length; i++) {
+      if (this.haz[i].on && this.haz[i].kind === 3) {
+        this.nextBhAt = this.t + 6 + R() * 6;
+        return;
+      }
+    }
+    const gap = (BH_GAP0 + (BH_GAP1 - BH_GAP0) * u) * (0.8 + R() * 0.5);
+    this.nextBhAt = this.t + Math.max(8, gap);
+    if (!force && R() > (0.55 + 0.35 * u)) return; // still skip sometimes early
+
+    const drawW = BH_DRAW_W * (0.92 + R() * 0.16);
+    // Continuous Y anywhere on playable band — bias slightly so one skirt is always open
+    const yMin = 110, yMax = WORLD_H - 110;
+    let y = yMin + R() * (yMax - yMin);
+    // Prefer upper or lower third ~60% so skirt is obvious
+    if (R() < 0.6) y = R() < 0.5 ? (yMin + R() * 160) : (yMax - R() * 160);
+    // Place ahead of view so player approaches the well
+    const x = this.cam + this.viewW + 140 + R() * 120;
+
+    // Escape-path / don't brick: if nearby ahead debris already clogs both skirts, nudge Y
+    let clogTop = 0, clogBot = 0;
+    for (let i = 0; i < this.haz.length; i++) {
+      const o = this.haz[i]; if (!o.on || o.par !== 1 || o.kind === 3) continue;
+      if (Math.abs(o.x - x) > BH_PULL_R * 0.85) continue;
+      if (o.y < WORLD_H * 0.45) clogTop++; else clogBot++;
+    }
+    if (clogTop >= 2 && clogBot < 2) y = Math.max(y, WORLD_H * 0.58);
+    else if (clogBot >= 2 && clogTop < 2) y = Math.min(y, WORLD_H * 0.42);
+
+    const h = this._hazard("hazard-blackhole", x, y, drawW, 1, 0, 0, this._zoneAtX(x));
+    if (h) {
+      h.kind = 3;
+      h.rot = R() * Math.PI * 2;
+      h.pullR = BH_PULL_R;
+      this.bhN++;
+      this._log("bh_spawn", this.t);
+    }
+  };
+  P._bhPullPlayer = function (dt) {
+    this._bhInPull = false;
+    if (this.crashed || this.phase !== "flight") return;
+    const cam = this.cam;
+    for (let i = 0; i < this.haz.length; i++) {
+      const h = this.haz[i]; if (!h.on || h.kind !== 3) continue;
+      const hx = h.x - cam * h.par;
+      const dx = hx - this.px, dy = h.y - this.py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist >= BH_PULL_R || dist < 1) continue;
+      this._bhInPull = true;
+      // radial accel toward core; player X is fixed so only vertical component fights thrust
+      const a = BH_G / (dist * dist + BH_SOFT);
+      this.vy += a * (dy / dist) * dt;
+    }
+  };
+
+  P._hazard = function (name, x, y, drawW, par, vx, vy, zone) {
     let h = null; for (let i = 0; i < this.haz.length; i++) if (!this.haz[i].on) { h = this.haz[i]; break; }
     if (!h) return null;
     const m = SPR[name]; if (!m) return null;
@@ -519,6 +604,15 @@
     c = clamp(c, lo, hi);
     if (Math.abs(c - this.lastGapC) < 35 && Math.abs(gapH - this.gapJitter) < 25) {
       c = clamp(c + (R() < 0.5 ? -1 : 1) * (80 + R() * 120), lo, hi);
+    }
+    // Never spawn a layout that starts with zero escape vs an active BH (closing over time OK)
+    for (let i = 0; i < this.haz.length; i++) {
+      const bh = this.haz[i]; if (!bh.on || bh.kind !== 3) continue;
+      if (Math.abs(bh.x - gx) > BH_PULL_R + 80) continue;
+      // push gap centre away from BH core so a skirt lane exists at spawn
+      const away = c < bh.y ? -1 : 1;
+      const need = bh.r + gapH * 0.35 + 36;
+      if (Math.abs(c - bh.y) < need) c = clamp(bh.y + away * need, lo, hi);
     }
     this.gapJitter = gapH;
     const g0 = c - gapH / 2, g1 = c + gapH / 2;
@@ -570,6 +664,11 @@
       }
       cy = clamp(cy, edgePad, edgePadBot);
       if (cy + visR > g0 && cy - visR < g1) return false;
+      for (let bi = 0; bi < this.haz.length; bi++) {
+        const bh = this.haz[bi]; if (!bh.on || bh.kind !== 3) continue;
+        const dx = bh.x - x, dy = bh.y - cy;
+        if (dx * dx + dy * dy < (bh.r + rr + 28) * (bh.r + rr + 28)) return false;
+      }
       this._hazard(name, x, cy, w, 1, 0, 0, zone);
       used.push(name);
       return true;
@@ -686,8 +785,25 @@
 
   P._stepObjects = function (dt) {
     const cam = this.cam;
+    // BLACKHOLE: spin rings/arms; lighter radial pull on other deadly hazards + meteors
+    const bhs = [];
     for (let i = 0; i < this.haz.length; i++) {
       const h = this.haz[i]; if (!h.on) continue;
+      if (h.kind === 3) { h.rot += BH_SPIN * dt; bhs.push(h); }
+    }
+    for (let i = 0; i < this.haz.length; i++) {
+      const h = this.haz[i]; if (!h.on) continue;
+      if (h.kind !== 3 && h.par === 1 && bhs.length) {
+        for (let b = 0; b < bhs.length; b++) {
+          const bh = bhs[b];
+          const dx = bh.x - h.x, dy = bh.y - h.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist >= BH_PULL_R || dist < 1) continue;
+          const a = (BH_G * BH_OTHER) / (dist * dist + BH_SOFT);
+          h.vx += a * (dx / dist) * dt;
+          h.vy += a * (dy / dist) * dt;
+        }
+      }
       h.x += h.vx * dt; h.y += h.vy * dt;
       const sx = h.x - cam * h.par;
       // keep right-entering movers alive until well past the left edge
@@ -827,6 +943,14 @@
       if (ahead < -60 || ahead > 300) continue;
       const tAhead = Math.max(0, ahead) / Math.max(1, this.speed), yh = h.y + h.vy * tAhead;
       const yp = this.py + this.vy * tAhead;
+      if (h.kind === 3) {
+        // skirt: aim for the nearer open band away from core (don't coast into middle)
+        const preferUp = yh > WORLD_H * 0.5;
+        const skirt = preferUp ? Math.min(yh - 140, 150) : Math.max(yh + 140, WORLD_H - 150);
+        target = skirt;
+        if (Math.abs(yp - yh) < BH_PULL_R * 0.55) dodge += (yp < yh ? -1 : 1) * 120;
+        continue;
+      }
       if (Math.abs(yp - yh) < h.r + 34) dodge += (yp < yh ? -1 : 1) * (h.r + 60);
     }
     target += dodge;
@@ -940,12 +1064,20 @@
         const im = this._get(h.im); if (!im) continue;
         const sx = h.x - cam * h.par;
         if (sx + h.dw < -50 || sx - h.dw > VW + 50) continue;
-        if (h.rot) {
-          x.save(); x.translate(sx, h.y); x.rotate(h.rot);
+        if (h.kind === 3 || h.rot) {
+          x.save(); x.translate(sx, h.y); x.rotate(h.rot || 0);
           x.drawImage(im, Math.round(-h.ox), Math.round(-h.oy), Math.round(h.dw), Math.round(h.dh));
           x.restore();
         } else {
           x.drawImage(im, Math.round(sx - h.ox), Math.round(h.y - h.oy), Math.round(h.dw), Math.round(h.dh));
+        }
+        if (this.cfg && this.cfg.debugHitbox && h.kind === 3) {
+          x.save();
+          x.strokeStyle = "rgba(255,80,120,0.9)"; x.lineWidth = 2;
+          x.beginPath(); x.arc(sx, h.y, h.r, 0, Math.PI * 2); x.stroke(); // CORE death
+          x.strokeStyle = "rgba(180,100,255,0.35)"; x.lineWidth = 1;
+          x.beginPath(); x.arc(sx, h.y, BH_PULL_R, 0, Math.PI * 2); x.stroke(); // soft pull
+          x.restore();
         }
       }
     }
@@ -977,6 +1109,11 @@
       const f = this.fx[i]; if (!f.on) continue;
       x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
       x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+    }
+    // cheap pull vignette (skip-heavy; only while inside BH soft radius)
+    if (this._bhInPull && !this.crashed) {
+      x.fillStyle = "rgba(40,10,60,0.12)";
+      x.fillRect(0, 0, VW, WORLD_H);
     }
     // crash dim
     if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }

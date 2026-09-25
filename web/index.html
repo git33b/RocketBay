@@ -398,15 +398,15 @@
 
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=audio1"></script>
-  <script src="audio.js?v=flight2b"></script>
-  <script src="liftoff.js?v=flight2b"></script>
-  <script src="flight.js?v=flight2b"></script>
+  <script src="audio.js?v=bh1"></script>
+  <script src="liftoff.js?v=bh1"></script>
+  <script src="flight.js?v=bh1"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "audio1";
     const PAD_VER = "pad5";
-    const APP_VER = "flight2b";
+    const APP_VER = "bh1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1168,6 +1168,7 @@
       f.o.onTutorialDone = () => { LS.set("rb_ft_tutorial_seen", "1"); };
       f.start({
         sprites, tod: TODS[state.todIndex].id, seed, bot: window.__flightBot || buildBotCfg(),
+        forceBh: QS.has("bhforce") || QS.has("bh"), debugHitbox: QS.has("hitbox"),
         tutorial: showTut,
       });
       window.__flightInfo = { mode: sprites.mode, packKey: sprites.packKey, chain: f.chain.map((n) => [+n.x.toFixed(1), +n.y.toFixed(1), +n.r.toFixed(1)]), seed };
