@@ -1,4 +1,4 @@
-/* RocketBay FLIGHT MODE v1 / flight2c live / bh1g-lab (blackhole-v1)
+/* RocketBay FLIGHT MODE v1 / flight2d live / bh1g-lab (blackhole-v1)
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
  * swallow death (no crash boom on BH), L1 1–2 random BHs; depth scales draw+pullR ~1→1.25→1.5;
