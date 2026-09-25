@@ -1,4 +1,5 @@
-/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-d2 pickup+shield+settle
+/* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-d3 zone-vibrancy
+ * GP1-BETA D3: unique planet set at depth + parallax nebula wash + ice-shard breakup (ice-hazard-variants).
  * GP1-BETA D2: coin pickup sparkle+trail; stronger shield oval + near-miss flash; settle streaks + ALT tick.
  * GP1-BETA D1: danger rim + hot tick on deadly hazards; decor planets never inherit rim.
  * GP1-BETA C2: cruise longer dual-layer exhaust + ~10° nose-up while thrusting (flight gameplay).
@@ -55,6 +56,10 @@
   const NEARMISS_COOL = 0.45;                        // flash cooldown
   const PICKUP_TRAIL_N = 4;                          // ≤4 gold trail dots
   const ALT_TICK_S = 1.35;                           // ↑ ALT HUD tick on settle fade-in
+  // gp1-d3 zone vibrancy
+  const NEBULA_WASH_A = 0.14;                        // parallax accent wash alpha (depth layer)
+  const ICE_SHARD_DECOR_N = 3;                       // breakup shards near ice-zone rocks (decor, not new class)
+  const PLANET_DEPTH_P = 0.18;                       // decor chance to spawn unique planet_* at depth
   // BLACKHOLE v1 / bh1g (named tunables — CoE playtest; lab-only global pull + strong-G)
   // Native 216×212 gated into sprites/hazard-blackhole.png — BH_DRAW_SCALE=1 (no interim 2×).
   // Base size as-is at early depth; draw+pullR grow with depth (pullR = debug/vignette/spawn only).
@@ -116,12 +121,21 @@
   };
 
   const ZONES = [
-    { name: "ORBIT EDGE", tile: "bg-orbit-edge-tile.png", accent: "#6ec8ff", mix: { asteroid: 1, planet: 0, comet: 0, ember: 0 }, small: true, body: "earth-limb.png", bodyY: 105, bodySide: 1 },
-    { name: "ASTEROID BELT", tile: "zones/bg-zone-asteroid-belt-tile.png", accent: "#e8a860", mix: { asteroid: 1.8, planet: 0, comet: 0, ember: 0 } },
-    { name: "NEBULA", tile: "bg-deepspace-tile.png", accent: "#c492ff", mix: { asteroid: 1, planet: 0.35, comet: 0, ember: 0 } },
-    { name: "GAS GIANT", tile: "zones/bg-zone-gas-giant-tile.png", accent: "#7ed6c4", mix: { asteroid: 0.6, planet: 0.6, comet: 0, ember: 0 }, body: "zones/gas-giant-body.png", bodyY: 300, bodySide: 1 },
-    { name: "ICE FIELD", tile: "zones/bg-zone-ice-comet-tile.png", accent: "#d6f4ff", mix: { asteroid: 0.5, planet: 0, comet: 1, ember: 0 }, ice: true },
-    { name: "RED SUN", tile: "zones/bg-zone-red-sun-tile.png", accent: "#ff8040", mix: { asteroid: 0.7, planet: 0, comet: 0, ember: 1 }, body: "zones/red-sun-body.png", bodyY: 0, bodySide: -1 },
+    { name: "ORBIT EDGE", tile: "bg-orbit-edge-tile.png", accent: "#6ec8ff", mix: { asteroid: 1, planet: 0.28, comet: 0, ember: 0 }, small: true, body: "earth-limb.png", bodyY: 105, bodySide: 1 },
+    { name: "ASTEROID BELT", tile: "zones/bg-zone-asteroid-belt-tile.png", accent: "#e8a860", mix: { asteroid: 1.8, planet: 0.22, comet: 0, ember: 0 } },
+    { name: "NEBULA", tile: "bg-deepspace-tile.png", accent: "#c492ff", mix: { asteroid: 1, planet: 0.48, comet: 0, ember: 0 } },
+    { name: "GAS GIANT", tile: "zones/bg-zone-gas-giant-tile.png", accent: "#7ed6c4", mix: { asteroid: 0.6, planet: 0.72, comet: 0, ember: 0 }, body: "zones/gas-giant-body.png", bodyY: 300, bodySide: 1 },
+    { name: "ICE FIELD", tile: "zones/bg-zone-ice-comet-tile.png", accent: "#d6f4ff", mix: { asteroid: 0.5, planet: 0.32, comet: 1, ember: 0 }, ice: true },
+    { name: "RED SUN", tile: "zones/bg-zone-red-sun-tile.png", accent: "#ff8040", mix: { asteroid: 0.7, planet: 0.26, comet: 0, ember: 1 }, body: "zones/red-sun-body.png", bodyY: 0, bodySide: -1 },
+  ];
+  // gp1-d3: unique planet set per zone (depth decor + parallax bodies) — reuse kit sprites only
+  const ZONE_PLANETS = [
+    ["planet_moon", "planet_gas"],
+    ["planet_moon", "planet_gas"],
+    ["planet_gas", "planet_moon", "planet_ringed"],
+    ["planet_ringed", "planet_gas", "planet_moon"],
+    ["planet_moon", "planet_ringed"],
+    ["planet_gas", "planet_moon"],
   ];
   const TRANS = ["zones/zone-trans-12.png", "zones/zone-trans-23.png", "zones/zone-trans-34.png", "zones/zone-trans-45.png", "zones/zone-trans-56.png", "zones/zone-trans-61.png"];
   // manifest flight-pack-v1 hazards.sprites: native size, hitbox circle (deadly already 0.8 x visible r)
@@ -220,7 +234,7 @@
     this.haz = []; for (let i = 0; i < 160; i++) this.haz.push({ on: false, im: null, x: 0, y: 0, vx: 0, vy: 0, r: 0, dw: 0, dh: 0, ox: 0, oy: 0, par: 1, kind: 0, rot: 0 });
     this.pick = []; for (let i = 0; i < 220; i++) this.pick.push({ on: false, kind: 0, x: 0, y: 0, r: 0, ph: 0, im: null, dw: 0, dh: 0, ox: 0, oy: 0 });
     this.fx = []; for (let i = 0; i < 120; i++) this.fx.push({ on: false, kind: 0, x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 0, c: 0, ang: 0, sc: 1 });
-    this.decor = []; for (let i = 0; i < 24; i++) this.decor.push({ on: false, im: null, x: 0, y: 0, par: 0.5, w: 0, h: 0 });
+    this.decor = []; for (let i = 0; i < 36; i++) this.decor.push({ on: false, im: null, x: 0, y: 0, par: 0.5, w: 0, h: 0 });
     this.dust = []; for (let i = 0; i < 18; i++) this.dust.push({ x: 0, y: 0 });
     this.nodesW = []; for (let i = 0; i < 7; i++) this.nodesW.push({ x: 0, y: 0, r: 0 });
     this._hud = { km: -1, kmS: "", coins: -1, coinsS: "" };
@@ -854,9 +868,12 @@
     if (!h) return null;
     const m = SPR[name]; if (!m) return null;
     const sc = drawW / m[0];
-    const rel = (zone === 4 && name.indexOf("asteroid") === 0) ? "zones/ice-hazard-variants/" + name + ".png" : name + ".png";
+    // gp1-d3: ice zone asteroids use ice-hazard-variants (same hazard class; D1 rim via basename)
+    const iceAst = (zone === 4 || (ZONES[zone] && ZONES[zone].ice)) && name.indexOf("asteroid") === 0;
+    const rel = iceAst ? "zones/ice-hazard-variants/" + name + ".png" : name + ".png";
     h.on = true; h.im = rel; h.x = x; h.y = y; h.vx = vx || 0; h.vy = vy || 0; h.par = par || 1;
     h.r = m[4] * sc; h.dw = m[0] * sc; h.dh = m[1] * sc; h.ox = m[2] * sc; h.oy = m[3] * sc; h.rot = 0; h.kind = 0;
+    h.ice = !!iceAst; // tagged ice breakup shard (not a new deadly class)
     return h;
   };
   P._pickup = function (kind, x, y) { // kind: 0 coin, 1 fuel, 2 shield, 3 magnet, 4 gem
@@ -992,10 +1009,11 @@
     this.gates.push({ x: gx, c: c, gapH: gapH, n: n, cluster: cluster, g0: g0, g1: g1, placed: placed });
 
     // big parallax planets (non denser-than-gate; stay out of escape bookkeeping)
+    // gp1-d3: unique planet set per zone (planet_gas / moon / ringed)
     const mix = Z.mix;
-    if (mix.planet > 0 && R() < 0.22 * mix.planet && this.gateN > 2) {
-      const pk = R();
-      const name = zone === 3 ? (pk < 0.5 ? "planet_ringed" : "planet_moon") : (pk < 0.6 ? "planet_gas" : "planet_moon");
+    if (mix.planet > 0 && R() < 0.28 * mix.planet && this.gateN > 2) {
+      const set = ZONE_PLANETS[zone] || ZONE_PLANETS[0];
+      const name = set[Math.floor(R() * set.length)];
       const drawW = name === "planet_ringed" ? 420 + R() * 100 : name === "planet_gas" ? 220 + R() * 100 : 140 + R() * 80;
       const m = SPR[name];
       if (m) {
@@ -1063,6 +1081,24 @@
       }
     }
 
+    // gp1-d3: ice-shard breakup near ice-zone rocks — decor VFX feel (no new hazard class)
+    if (Z.ice) {
+      const nS = 1 + Math.floor(R() * ICE_SHARD_DECOR_N);
+      for (let s = 0; s < nS; s++) {
+        let d = null; for (let i = 0; i < this.decor.length; i++) if (!this.decor[i].on) { d = this.decor[i]; break; }
+        if (!d) break;
+        const vi = Math.floor(R() * 5);
+        const sc = 0.28 + R() * 0.34; // smaller than gameplay rocks → reads as breakup debris
+        const m = SPR["asteroid_" + vi]; if (!m) continue;
+        d.on = true;
+        d.im = "zones/ice-hazard-variants/asteroid_" + vi + ".png";
+        d.par = PAR.mid;
+        d.w = Math.round(m[0] * sc); d.h = Math.round(m[1] * sc);
+        d.x = gx + (R() * 2 - 1) * 90;
+        d.y = clamp(c + (R() * 2 - 1) * (gapH * 0.55 + 40), 90, WORLD_H - 90);
+      }
+    }
+
     this.lastGapC = c;
     this.nextGateX = gx + spacing;
   };
@@ -1071,17 +1107,37 @@
     const R = () => this._rand();
     const wx = this.nextDecorX;
     let d = null; for (let i = 0; i < this.decor.length; i++) if (!this.decor[i].on) { d = this.decor[i]; break; }
-    const zone = this._zoneAtX(wx / PAR.mid) + 1;
+    const zIdx = this._zoneAtX(wx / PAR.mid);
+    const zone = zIdx + 1;
     if (d) {
       const q = R();
-      if (q < 0.12) { d.im = "parallax/setpiece-station-z" + zone + ".png"; d.par = PAR.mid; d.w = 184; d.h = 80; d.y = 200 + R() * 260; }
-      else if (q < 0.62) { d.im = "parallax/decor-planets/z" + zone + "-mid-" + Math.floor(R() * 8) + ".png"; d.par = PAR.mid; d.w = 0; d.h = 0; d.y = 84 + R() * 520; }
-      else if (q < 0.8) { d.im = "parallax/decor-planets/z" + zone + "-far-" + Math.floor(R() * 4) + ".png"; d.par = PAR.farPlanets; d.w = 0; d.h = 0; d.y = 84 + R() * 520; }
-      else { d.im = "parallax/decor-" + (R() < 0.5 ? "gas" : "moon") + "-z" + zone + ".png"; d.par = PAR.mid; d.w = 0; d.h = 0; d.y = 84 + R() * 520; }
+      // gp1-d3: unique planet_* sprites at depth (parallax) — primary vibrancy read
+      if (q < PLANET_DEPTH_P) {
+        const set = ZONE_PLANETS[zIdx] || ZONE_PLANETS[0];
+        const name = set[Math.floor(R() * set.length)];
+        const m = SPR[name];
+        const far = R() < 0.45;
+        const sc = far
+          ? (name === "planet_ringed" ? 0.55 + R() * 0.25 : 0.4 + R() * 0.3)
+          : (name === "planet_ringed" ? 0.85 + R() * 0.35 : 0.65 + R() * 0.4);
+        d.im = name + ".png";
+        d.par = far ? PAR.farPlanets : PAR.mid;
+        d.w = m ? Math.round(m[0] * sc) : 0;
+        d.h = m ? Math.round(m[1] * sc) : 0;
+        d.y = 60 + R() * 520;
+      } else if (q < PLANET_DEPTH_P + 0.10) {
+        d.im = "parallax/setpiece-station-z" + zone + ".png"; d.par = PAR.mid; d.w = 184; d.h = 80; d.y = 200 + R() * 260;
+      } else if (q < PLANET_DEPTH_P + 0.55) {
+        d.im = "parallax/decor-planets/z" + zone + "-mid-" + Math.floor(R() * 8) + ".png"; d.par = PAR.mid; d.w = 0; d.h = 0; d.y = 84 + R() * 520;
+      } else if (q < PLANET_DEPTH_P + 0.72) {
+        d.im = "parallax/decor-planets/z" + zone + "-far-" + Math.floor(R() * 4) + ".png"; d.par = PAR.farPlanets; d.w = 0; d.h = 0; d.y = 84 + R() * 520;
+      } else {
+        d.im = "parallax/decor-" + (R() < 0.5 ? "gas" : "moon") + "-z" + zone + ".png"; d.par = PAR.mid; d.w = 0; d.h = 0; d.y = 84 + R() * 520;
+      }
       d.on = true;
-      d.x = d.par === PAR.mid ? wx : (wx / PAR.mid) * PAR.farPlanets + 100; // x in its own parallax space
+      d.x = d.par === PAR.mid ? wx : (wx / PAR.mid) * d.par + 100; // x in its own parallax space
     }
-    this.nextDecorX = wx + 300 + R() * 360;
+    this.nextDecorX = wx + 260 + R() * 320;
   };
 
   P._stepObjects = function (dt) {
@@ -1491,15 +1547,41 @@
       }
       x.restore();
     }
+    // gp1-d3: parallax nebula depth wash — zone accent bands at far/mid rates (distinct palettes)
+    {
+      const zWash = mod(Math.floor(this._artU() / SEG), 6);
+      const ZW = ZONES[zWash] || ZONES[0];
+      x.save();
+      x.fillStyle = ZW.accent;
+      // far wash (slower)
+      x.globalAlpha = NEBULA_WASH_A * 0.85;
+      const farOff = mod(cam * PAR.farPlanets * 0.35, VW + 280);
+      for (let i = 0; i < 4; i++) {
+        const bx = -farOff + i * 210;
+        const by = 36 + (i % 3) * 200 + Math.sin(cam * 0.008 + i * 1.7) * 28;
+        x.fillRect(Math.round(bx), Math.round(by), Math.round(VW * 0.42), 72 + (i % 2) * 28);
+      }
+      // mid wash (richer, slightly faster)
+      x.globalAlpha = NEBULA_WASH_A * 1.15;
+      const midOff = mod(cam * PAR.mid * 0.28, VW + 200);
+      for (let i = 0; i < 3; i++) {
+        const bx = VW * 0.15 - midOff + i * 260;
+        const by = WORLD_H - 160 - i * 150 + Math.cos(cam * 0.01 + i) * 22;
+        x.fillRect(Math.round(bx), Math.round(by), Math.round(VW * 0.5), 64 + i * 12);
+      }
+      x.restore();
+    }
     // 3) zone edge body (x fixed): earth limb rises in the pitch-over and drops out over 0-600 km
     this._drawBody(x);
     // 4) set-piece comet (far layer, own velocity)
     if (this.comet.on) { const c = this._get("parallax/setpiece-comet.png"); if (c) { x.save(); x.translate(this.comet.x, this.comet.y); x.rotate(0.176); x.drawImage(c, -88, -20); x.restore(); } }
-    // 5) decor: far planets 0.2x, mid decor 0.5x
+    // 5) decor: far planets 0.2x, mid decor 0.5x (+ gp1-d3 unique planet_* / ice shards with optional scale)
     for (let i = 0; i < this.decor.length; i++) {
       const d = this.decor[i]; if (!d.on) continue;
       const im = this._get(d.im); if (!im) continue;
-      x.drawImage(im, Math.round(d.x - cam * d.par), Math.round(d.y));
+      const sx = Math.round(d.x - cam * d.par), sy = Math.round(d.y);
+      if (d.w > 0 && d.h > 0) x.drawImage(im, sx, sy, d.w, d.h);
+      else x.drawImage(im, sx, sy);
     }
     // 6) near dust (1.3x): drawn under the gameplay layer so it never covers sprite or HUD pixels
     if (this.phase === "flight") {
@@ -1516,8 +1598,9 @@
         const im = this._get(h.im); if (!im) continue;
         const sx = h.x - cam * h.par;
         if (sx + h.dw < -50 || sx - h.dw > VW + 50) continue;
-        // gp1-d1: deadly = gameplay hazards (asteroid/hazard-*/meteor); never decor planets (par!==1) or BH (own C3 telegraph)
-        const deadly = h.par === 1 && h.kind !== 3 && (h.kind === 2 || (h.im && (h.im.indexOf("asteroid") === 0 || (h.im.indexOf("hazard-") === 0 && h.im.indexOf("hazard-blackhole") !== 0))));
+        // gp1-d1/d3: deadly = gameplay hazards (asteroid/hazard-*/meteor/ice-variants); never decor planets (par!==1) or BH
+        const baseIm = h.im ? h.im.split("/").pop() : "";
+        const deadly = h.par === 1 && h.kind !== 3 && (h.kind === 2 || (baseIm && (baseIm.indexOf("asteroid") === 0 || (baseIm.indexOf("hazard-") === 0 && baseIm.indexOf("hazard-blackhole") !== 0))));
         const decorPlanet = h.par !== 1;
         if (h.kind === 3 || h.rot) {
           x.save(); x.translate(sx, h.y); x.rotate(h.rot || 0);
@@ -2178,6 +2261,8 @@
       // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
       BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
+      // gp1-d2/d3
+      SHIELD_RX, SHIELD_RY, PICKUP_TRAIL_N, ALT_TICK_S, NEBULA_WASH_A, ICE_SHARD_DECOR_N, PLANET_DEPTH_P,
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
