@@ -497,7 +497,7 @@
       if (!b || !b.s1) return "Empty pad";
       const p = PART_STATS && PART_STATS[b.s1];
       const fam = (p && p.displayName) || (M()[b.s1] && M()[b.s1].label) || nick(b.s1) || "Stack";
-      return fam.replace(/\b(Stage|Booster|Core|Fairing|Ship|Tank)\b/gi, "").replace(/\s+/g, " ").trim() + " stack";
+      return fam.replace(/\b(Stage|Booster|Fairing|Ship|Tank)\b/gi, "").replace(/\s+/g, " ").trim() + " stack";
     }
     /** Live 0–100 bars from stack mass/thrust/agility (PART-STATS). Scaled so Moon Giant ≈92/90/72 and Pencil ≈50/70/84. */
     function computeStackAttrs(b) {
