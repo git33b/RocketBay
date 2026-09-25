@@ -1,4 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
+ * GP1-BETA C2: cruise longer dual-layer exhaust + ~10° nose-up while thrusting (flight gameplay).
  * GP1-BETA s6b5: plume hold/morph + scenery crossfade across reveal; keep scale/lb/no-second-climb, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
@@ -31,8 +32,9 @@
   // (removed PITCH_XFADE — no alpha crossfade of two unrelated worlds)
   const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
   const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
-  const TILT_MAX = 8 * Math.PI / 180, TILT_RATE = 7;     // gp1: ~0–8° nose-up while thrusting only
+  const TILT_MAX = 10 * Math.PI / 180, TILT_RATE = 7;    // gp1-c2: ~10° nose-up while thrusting only
   const CLIMB_PLUME = 2.35;                  // climb flame length vs flight (match pad power)
+  const FLIGHT_PLUME = 2.85;                 // gp1-c2: longer cruise exhaust (dual-layer trail)
   const CLIMB_SHAKE = 3.2;                   // climb cam shake amp (design px)
   const FUEL_DRAIN = 1 / 11;                 // tank fraction per second of thrust held (placeholder)
   const FUEL_REFILL = 0.5;                   // fuel pickup
@@ -591,7 +593,7 @@
       this.vy = clamp(this.vy, -VY_MAX, VY_MAX);
       this.py += this.vy * dt;
       if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
-      const tt = thrusting ? -TILT_MAX * (0.55 + 0.45 * clamp(-this.vy / VY_MAX, 0, 1)) : 0;
+      const tt = thrusting ? -TILT_MAX * (0.88 + 0.12 * clamp(-this.vy / VY_MAX, 0, 1)) : 0; // c2: ~9–10° while thrusting
       this.tilt += (tt - this.tilt) * Math.min(1, TILT_RATE * dt);
       // keep in band
       if (this.py < 40) { this.py = 40; this.vy = Math.max(0, this.vy); }
@@ -646,8 +648,8 @@
     this.vy = clamp(this.vy, -VY_MAX * 1.15, VY_MAX * 1.15);
     this.py += this.vy * dt;
     if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * (light ? LIGHT_FUEL : 1) * dt);
-    // gp1: flat ~0° while coasting; nose-up only while thrusting (ease with hold). Never sit ~45°.
-    const tt = thrusting ? -TILT_MAX * (0.55 + 0.45 * clamp(-this.vy / VY_MAX, 0, 1)) : 0;
+    // gp1-c2: flat ~0° while coasting; ~10° nose-up only while thrusting (ease with hold). Never sit ~45°.
+    const tt = thrusting ? -TILT_MAX * (0.88 + 0.12 * clamp(-this.vy / VY_MAX, 0, 1)) : 0; // c2: ~9–10° while thrusting
     const k = TILT_RATE * (light ? LIGHT_TILT : 1) * (thrusting ? 1 : 1.35);
     this.tilt += (tt - this.tilt) * Math.min(1, k * dt);
     if (this.shieldGrace > 0) this.shieldGrace -= dt;
@@ -1496,7 +1498,12 @@
         }
         const seamHoldFlame = this.phase === "settle" && this._seamSuppressFlame;
         const thrusting = !seamHoldFlame && ((this.phase === "climb" || this.phase === "pitch" || this.phase === "settle" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
-        this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, seamHoldFlame ? 0 : (this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1))) : 1));
+        // gp1-c2: cruise uses FLIGHT_PLUME (longer dual-layer); pitch morph unchanged; climb/tutorial stay 1 here
+        const cruisePh = this.phase === "flight" || this.phase === "practice";
+        const plumeSc = seamHoldFlame ? 0
+          : (this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)))
+            : (cruisePh ? FLIGHT_PLUME : 1));
+        this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, plumeSc);
         // exhaust sparks from engine nozzles only (gp1 P1#11)
         if (thrusting && (this.phase === "flight" || this.phase === "practice") && (Math.floor(this.t * 40) % 2 === 0)) {
           const nos = (this.sp && this.sp.nozzles) || [{ y: 0, s: 1 }];
@@ -1627,10 +1634,28 @@
           }
         }
       } else {
+        // gp1-c2 cruise: dual-layer (longer cool smoke trail + fire core), PSP-sharp fillRects
+        const cruise = this.phase === "flight" || this.phase === "practice";
+        if (cruise) {
+          const smokeL = L * 1.62;
+          const smHw = hw0 * 1.2;
+          x.fillStyle = "#2A2428"; x.fillRect(tailX - smokeL, y - smHw * 0.75, smokeL, smHw * 1.5);
+          x.fillStyle = "#4A3834"; x.fillRect(tailX - smokeL * 0.9, y - smHw * 0.6, smokeL * 0.9, smHw * 1.2);
+          // jagged tip nibble (no soft bloom)
+          if ((fl + i) % 2 === 0) {
+            x.fillStyle = "#1C181C";
+            x.fillRect(tailX - smokeL - 4, y - 2, 6, 3);
+            x.fillRect(tailX - smokeL + 5, y + smHw * 0.25, 7, 2);
+          } else {
+            x.fillStyle = "#1C181C";
+            x.fillRect(tailX - smokeL - 2, y + 1, 5, 2);
+            x.fillRect(tailX - smokeL + 8, y - smHw * 0.35, 6, 2);
+          }
+        }
         x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw0, L, hw0 * 2);
         x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
         x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
-        if (ps > 1.6) {
+        if (ps > 1.6 || cruise) {
           x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
         }
       }
@@ -1901,7 +1926,7 @@
       LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP,
       FUEL_DRAIN, FUEL_REFILL,
       // gp1-beta seam / tilt (continuous scale-in)
-      CLIMB_T, PITCH_T, SEAM_ZOOM0, SEAM_ZOOM1, SETTLE_T, SETTLE_ZOOM0, HUD_ZOOM_ON, SETTLE_FALL, LB_EASE_START, LB_EASE_END, TILT_MAX, TILT_RATE, CLIMB_PLUME, CLIMB_SHAKE,
+      CLIMB_T, PITCH_T, SEAM_ZOOM0, SEAM_ZOOM1, SETTLE_T, SETTLE_ZOOM0, HUD_ZOOM_ON, SETTLE_FALL, LB_EASE_START, LB_EASE_END, TILT_MAX, TILT_RATE, CLIMB_PLUME, FLIGHT_PLUME, CLIMB_SHAKE,
       // BLACKHOLE tunables (bh1g dump) — force a=BH_G/(BH_FALL*r+BH_SOFT)
       BH_GLOBAL_PULL, BH_DRAW_W, BH_PULL_R, BH_G_PREV, BH_G_MULT, BH_G, BH_FALL, BH_SOFT, BH_OTHER, BH_SPIN, BH_SWALLOW_S,
       BH_MIN_KM, BH_GAP0, BH_GAP1, BH_SCALE0, BH_SCALE1, BH_SCALE2, BH_LAB_BURST, BH_LAB_BURST_GAP0, BH_LAB_BURST_GAP1,
