@@ -1,5 +1,4 @@
-// RocketBay shared Firebase init (ES module, lazy). Used by feedback; a future leaderboard
-// imports the same module:  const { db, fs } = await (await import("./firebase-init.js")).getDb();
+// RocketBay shared Firebase init (ES module, lazy). Used by feedback + the flight-v1 leaderboard:  const { db, fs } = await (await import("./firebase-init.js")).getDb();
 // The web config is public by design (security is enforced by firestore.rules).
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
 export const FIREBASE_CONFIG = {
@@ -32,7 +31,8 @@ export function clientId() {
   }
   return id;
 }
-/** Adds the throttle stamp for this client to a batch (required by rules for throttled collections). */
-export function stampThrottle(fs, db, batch, cid) {
-  batch.set(fs.doc(db, "throttle", cid), { last: fs.serverTimestamp() });
+/** Adds the throttle stamp for this client to a batch (required by rules for throttled collections).
+ *  coll: "throttle" (feedback, 30 s) or "throttleLb" (leaderboard, 20 s). */
+export function stampThrottle(fs, db, batch, cid, coll) {
+  batch.set(fs.doc(db, coll || "throttle", cid), { last: fs.serverTimestamp() });
 }

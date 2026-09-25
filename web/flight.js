@@ -1,0 +1,1065 @@
+/* RocketBay FLIGHT MODE v1 (flight-v1)
+ * Endless hold-to-thrust flight after the liftoff climb. Art: FLIGHT-PACK, manifest block
+ * `flight-pack-v1.1` (files copied into web/flight/, masters untouched). All gameplay numbers are
+ * the pack's placeholders unless noted. Canvas 2D, fixed-step sim (1/120 s), pooled objects,
+ * NEAREST scaling, no allocations in the per-frame loop (HUD strings rebuild only on value change).
+ */
+(function (global) {
+  "use strict";
+
+  /* ---------------- tunables (named constants; CoE tunes at playtest) ---------------- */
+  const WORLD_H = 720;                       // play band height (design px) - same on every device
+  const MIN_VIEW_W = 760;                    // narrower screens (portrait) letterbox the band to show >= 760 px ahead
+  const PLAYER_X = 285;                      // rocket centre x after pitch-over
+  const ROCKET_LEN = 208;                    // flight sprite length (pack)
+  const CLIMB_T = 2.4, PITCH_T = 1.0;        // climb + pitch-over (pack)
+  const SPEED0 = 360, SPEED_RAMP = 0.8, SPEED_CAP = 620;  // +8 px/s per 10 s
+  const GRAVITY = 1400, THRUST = 2600, VY_MAX = 520;     // px/s^2, px/s^2, px/s
+  const TILT_MAX = 15 * Math.PI / 180, TILT_RATE = 9;    // tilt follows vy (1/s response)
+  const FUEL_DRAIN = 1 / 11;                 // tank fraction per second of thrust held (placeholder)
+  const FUEL_REFILL = 0.5;                   // fuel pickup
+  const KM_PER_PX = 1500 / 15360;            // 1 zone (1500 km) == one zone-art segment (3840 art px at 0.25x)
+  const DEPLOY_MIN_KM = 300;
+  const BONUS_K = 50, BONUS_EXP = 1.5;       // bonus = round(K * (km/100)^EXP)
+  const COIN_PTS = 5;                        // score per coin
+  const GEM_COINS = 10;                      // a gem counts as 10 coins (placeholder)
+  const LIGHT_THRUST = 1.25, LIGHT_GRAVITY = 0.85, LIGHT_TILT = 1.3, LIGHT_FUEL = 0.8; // after deploy
+  const DEPLOY_FRAME_S = 1 / 12, CRASH_FRAME_S = 0.067;
+  const CRASH_DIM_AT = 0.6, CRASH_DIM_RAMP = 0.2, CRASH_DIM = 0.4, GAMEOVER_AT = 0.85;
+  const MAGNET_S = 8, MAGNET_R = 230, SHIELD_GRACE = 1.0;
+  const SIM_DT = 1 / 120;
+  const PAR = { stars: 0.1, zone: 0.25, farPlanets: 0.2, mid: 0.5, planets: 0.7, game: 1.0, dust: 1.3 };
+  const SEG_TILE = 2560, SEG_TRANS = 1280, SEG = SEG_TILE + SEG_TRANS; // zone art segment (art px)
+  const TIERS = [ // pack tiers (speed band -> density)
+    { max: 420, spacing: 720, gap: 300, extra: 1.4, shift: 160, arcs: 1.2, fuelN: 5, shield: 0.06, magnet: 0.06, gem: 0.02 },
+    { max: 490, spacing: 640, gap: 265, extra: 1.8, shift: 180, arcs: 1.1, fuelN: 5, shield: 0.07, magnet: 0.07, gem: 0.03 },
+    { max: 560, spacing: 590, gap: 235, extra: 2.2, shift: 190, arcs: 1.0, fuelN: 4, shield: 0.08, magnet: 0.07, gem: 0.04 },
+    { max: 1e9, spacing: 560, gap: 210, extra: 2.6, shift: 200, arcs: 0.9, fuelN: 4, shield: 0.10, magnet: 0.06, gem: 0.05 },
+  ];
+  // flight-pack-v1.3.1 spacing + escape-gap (Ateeb): spread default, cluster occasional, gap always
+  const CLUSTER_P = 0.20;                 // ~15-25% of walls are dense packs
+  const SPREAD_HX = [180, 320];           // loose horizontal between pieces when n>1
+  const GAP_START = 240;                  // ~1/3 of WORLD_H at the start of the run
+  // per-zone debris palette (hazards participate in the same wall/gap system as asteroids)
+  const DEBRIS_MIX = [
+    ["hazard-satellite", "hazard-telescope", "asteroid_0", "asteroid_2", "asteroid_4"],           // orbit edge
+    ["hazard-wreckage_0", "hazard-wreckage_1", "hazard-wreckage_2", "hazard-station", "asteroid_1", "asteroid_3"], // belt
+    ["hazard-station", "hazard-satellite", "hazard-telescope", "hazard-wreckage_1", "asteroid_2"], // nebula
+    ["hazard-station", "hazard-satellite", "asteroid_0", "asteroid_3"],                            // gas giant
+    ["hazard-wreckage_0", "hazard-wreckage_2", "hazard-telescope", "asteroid_1", "asteroid_4"],     // ice
+    ["hazard-wreckage_1", "hazard-wreckage_0", "asteroid_2", "asteroid_4"],                        // red sun (embers via extras)
+  ];
+  const DEBRIS_DRAW = { // typical draw widths from qa-flight-pack-v1.3-debris.json
+    "hazard-station": 140, "hazard-telescope": 110, "hazard-satellite": 84,
+    "hazard-wreckage_0": 70, "hazard-wreckage_1": 72, "hazard-wreckage_2": 64,
+  };
+
+  const ZONES = [
+    { name: "ORBIT EDGE", tile: "bg-orbit-edge-tile.png", accent: "#6ec8ff", mix: { asteroid: 1, planet: 0, comet: 0, ember: 0 }, small: true, body: "earth-limb.png", bodyY: 105, bodySide: 1 },
+    { name: "ASTEROID BELT", tile: "zones/bg-zone-asteroid-belt-tile.png", accent: "#e8a860", mix: { asteroid: 1.8, planet: 0, comet: 0, ember: 0 } },
+    { name: "NEBULA", tile: "bg-deepspace-tile.png", accent: "#c492ff", mix: { asteroid: 1, planet: 0.35, comet: 0, ember: 0 } },
+    { name: "GAS GIANT", tile: "zones/bg-zone-gas-giant-tile.png", accent: "#7ed6c4", mix: { asteroid: 0.6, planet: 0.6, comet: 0, ember: 0 }, body: "zones/gas-giant-body.png", bodyY: 300, bodySide: 1 },
+    { name: "ICE FIELD", tile: "zones/bg-zone-ice-comet-tile.png", accent: "#d6f4ff", mix: { asteroid: 0.5, planet: 0, comet: 1, ember: 0 }, ice: true },
+    { name: "RED SUN", tile: "zones/bg-zone-red-sun-tile.png", accent: "#ff8040", mix: { asteroid: 0.7, planet: 0, comet: 0, ember: 1 }, body: "zones/red-sun-body.png", bodyY: 0, bodySide: -1 },
+  ];
+  const TRANS = ["zones/zone-trans-12.png", "zones/zone-trans-23.png", "zones/zone-trans-34.png", "zones/zone-trans-45.png", "zones/zone-trans-56.png", "zones/zone-trans-61.png"];
+  // manifest flight-pack-v1 hazards.sprites: native size, hitbox circle (deadly already 0.8 x visible r)
+  const SPR = {
+    coin_f0: [127, 133, 63.6, 66.3, 65.6], coin_f1: [112, 133, 55.7, 66.4, 65.6], coin_f2: [49, 133, 23.9, 66.3, 65.6],
+    coin_f3: [103, 133, 50.8, 66.3, 65.6], coin_f4: [128, 133, 63.5, 66.4, 65.6],
+    fuel: [102, 148, 50.7, 77.2, 66.1], shield: [131, 143, 65.1, 65.5, 67.6], magnet: [125, 128, 62.0, 62.0, 60.9], gem: [171, 132, 85.3, 52.5, 66.5],
+    asteroid_0: [139, 121, 69.9, 62.7, 50.0], asteroid_1: [156, 137, 78.3, 70.8, 57.2], asteroid_2: [136, 125, 68.2, 63.5, 50.6],
+    asteroid_3: [160, 136, 80.6, 71.1, 56.7], asteroid_4: [129, 112, 64.3, 58.7, 45.7],
+    planet_gas: [162, 162, 80.6, 80.6, 65.0], planet_moon: [155, 155, 76.8, 77.4, 61.8], planet_ringed: [233, 147, 116.7, 72.8, 58.8],
+    comet: [293, 156, 70.4, 94.2, 51.3], ember: [155, 179, 65.3, 125.3, 46.2],
+    // flight-pack-v1.3 debris (hitbox = body only; station wings NON-colliding)
+    "hazard-station": [172, 96, 85.8, 49.1, 40.0],
+    "hazard-telescope": [112, 74, 56.8, 30.3, 31.0],
+    "hazard-satellite": [116, 63, 58.0, 32.8, 28.6],
+    "hazard-wreckage_0": [94, 50, 44.7, 24.5, 18.5],
+    "hazard-wreckage_1": [100, 50, 53.5, 22.3, 22.0],
+    "hazard-wreckage_2": [71, 50, 33.0, 24.6, 16.2],
+  };
+  // pack deploy / crash frame sets (manifest flight-pack-v1.deploy / .crash; steel regenerated in v1.1)
+  const PACK_STACKS = {
+    "steel-booster,steel-ship|0": { key: "steel", crash: true, origin: [0, 59.9] },
+    "gridfin-booster-s1,pencil-upper,gridfin-fairing|1": { key: "gridside", crash: false, origin: [0, 59.9] },
+    "moon-giant-s1,pencil-upper,orange-fairing|0": { key: "moonmix", crash: true, origin: [0, 60.2] },
+    "pencil-core-s1,euro-upper,euro-fairing|0": { key: "pencileuro", crash: false, origin: [0, 59.8] },
+  };
+  const RING_R = [0, 12, 20, 27, 33, 38, 42, 45];          // v1.1 deploy puff ring (screen px)
+  const PAY_FWD = [0, 6, 14, 24, 35, 46, 57, 68], PAY_SIDE = [0, 6, 11, 15, 18, 20, 21, 22];
+  const BURST_R = [20, 42, 62, 74, 80, 80, 74, 64];         // crash burst radius per frame
+  const BURST_COL = ["#FFFFEE", "#FFDE40", "#FF8C1C", "#D6301C", "#563A46"];
+  const HUD = { navy: "rgba(10,28,58,0.8)", cyan: "#64D2FF", inner: "#3C6385", text: "#E1F2FF" };
+
+  function bonusFor(km) { return km >= DEPLOY_MIN_KM ? Math.round(BONUS_K * Math.pow(km / 100, BONUS_EXP)) : 0; }
+  function scoreFor(distKm, bonus, coins) { return distKm + bonus + coins * COIN_PTS; }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function ease(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+  function easeOut(t) { t = clamp(t, 0, 1); return 1 - (1 - t) * (1 - t); }
+  function mod(a, n) { return ((a % n) + n) % n; }
+
+  /* ---------------- sprite prep (runs once per run start, outside the loop) ---------------- */
+  function cv(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; }
+  // nose-up composed stack (RGBA arrays) -> nose-right canvas, NN-scaled to ROCKET_LEN
+  function toFlightSprite(st, lit, predicate, len) {
+    const up = cv(st.w, st.h), ux = up.getContext("2d"), id = ux.createImageData(st.w, st.h);
+    for (let i = 0; i < st.w * st.h; i++) {
+      const o = st.owner[i]; if (!o || (predicate && !predicate(o - 1))) continue;
+      id.data[i * 4] = lit[i * 4]; id.data[i * 4 + 1] = lit[i * 4 + 1]; id.data[i * 4 + 2] = lit[i * 4 + 2]; id.data[i * 4 + 3] = 255;
+    }
+    ux.putImageData(id, 0, 0);
+    const k = len / st.h, W = len, H = Math.max(1, Math.round(st.w * k));
+    const c = cv(W, H), x = c.getContext("2d");
+    x.imageSmoothingEnabled = false;
+    x.translate(W, 0); x.rotate(Math.PI / 2);       // clockwise: nose (top) -> right
+    x.drawImage(up, 0, 0, st.w, st.h, 0, 0, H, W);   // rotated frame: width H (was w), height W (was h)
+    return { canvas: c, w: W, h: H, axisY: st.axisX * k, scale: k };
+  }
+  // 7-node capsule chain (pack rule): central 85 %, node r = 0.70 x local core half-thickness (min over segment)
+  function buildChain(spr) {
+    const { canvas, w, h } = spr, d = canvas.getContext("2d").getImageData(0, 0, w, h).data;
+    const ay = clamp(Math.round(spr.axisY), 0, h - 1);
+    const run = (x) => { // opaque run through the axis row at column x -> [centre, half]
+      if (!d[(ay * w + x) * 4 + 3]) return [ay, 0];
+      let a = ay, b = ay;
+      while (a > 0 && d[((a - 1) * w + x) * 4 + 3]) a--;
+      while (b < h - 1 && d[((b + 1) * w + x) * 4 + 3]) b++;
+      return [(a + b + 1) / 2, (b - a + 1) / 2];
+    };
+    const nodes = [], x0 = 0.075 * w, x1 = 0.925 * w, step = (x1 - x0) / 6;
+    for (let i = 0; i < 7; i++) {
+      const cx = x0 + i * step, s0 = Math.max(0, Math.floor(cx - step / 2)), s1 = Math.min(w - 1, Math.ceil(cx + step / 2));
+      let mh = 1e9, cy = ay;
+      for (let x = s0; x <= s1; x++) { const r = run(x); if (r[1] < mh) { mh = r[1]; } }
+      cy = run(Math.round(cx))[0];
+      nodes.push({ x: cx, y: cy, r: Math.max(0.5, 0.7 * (mh === 1e9 ? 0 : mh)) });
+    }
+    return nodes;
+  }
+  function loadImg(src) {
+    return new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = src; });
+  }
+
+  /* ---------------- engine ---------------- */
+  function FlightEngine(opts) {
+    this.o = opts;
+    this.base = opts.base || "flight/";
+    this.canvas = opts.canvas;
+    this.ctx = this.canvas.getContext("2d", { alpha: false });
+    this.img = {};
+    this.running = false; this.paused = false; this.captureMode = !!opts.captureMode;
+    this.events = [];
+    // pools
+    this.haz = []; for (let i = 0; i < 160; i++) this.haz.push({ on: false, im: null, x: 0, y: 0, vx: 0, vy: 0, r: 0, dw: 0, dh: 0, ox: 0, oy: 0, par: 1, kind: 0, rot: 0 });
+    this.pick = []; for (let i = 0; i < 220; i++) this.pick.push({ on: false, kind: 0, x: 0, y: 0, r: 0, ph: 0, im: null, dw: 0, dh: 0, ox: 0, oy: 0 });
+    this.fx = []; for (let i = 0; i < 90; i++) this.fx.push({ on: false, kind: 0, x: 0, y: 0, vx: 0, vy: 0, t: 0, life: 0, c: 0 });
+    this.decor = []; for (let i = 0; i < 24; i++) this.decor.push({ on: false, im: null, x: 0, y: 0, par: 0.5, w: 0, h: 0 });
+    this.dust = []; for (let i = 0; i < 18; i++) this.dust.push({ x: 0, y: 0 });
+    this.nodesW = []; for (let i = 0; i < 7; i++) this.nodesW.push({ x: 0, y: 0, r: 0 });
+    this._hud = { km: -1, kmS: "", coins: -1, coinsS: "" };
+    this._boundFrame = this._frame.bind(this);
+    this._layout();
+    window.addEventListener("resize", () => this._layout());
+  }
+  const P = FlightEngine.prototype;
+
+  P._src = function (rel) { return this.base + rel; };
+  P._get = function (rel) { // lazy image cache (returns null until loaded)
+    let e = this.img[rel];
+    if (!e) { e = this.img[rel] = { im: null, p: loadImg(this._src(rel)).then((i) => { e.im = i; return i; }) }; }
+    return e.im;
+  };
+  P._need = function (rels) { rels.forEach((r) => this._get(r)); return Promise.all(rels.map((r) => this.img[r].p)); };
+
+  // Everything the first seconds need (climb bridge for this TOD, orbit tile, earth limb, hazards, HUD)
+  P.preload = function (tod) {
+    const core = ["climb-bridge-" + tod + ".png", "bg-orbit-edge-tile.png", "earth-limb.png", "parallax/far-stars-tile.png",
+      "hud/deploy-icon.png", "fuel.png", "shield.png", "magnet.png", "gem.png", "zones/zone-trans-12.png", "parallax/setpiece-comet.png"];
+    for (let i = 0; i < 5; i++) core.push("coin_f" + i + ".png", "asteroid_" + i + ".png");
+    this._padSrc = this.o.padPlate ? this.o.padPlate(tod) : null;
+    const p = this._need(core);
+    const padP = this._padSrc ? loadImg(this._padSrc).then((i) => { this._pad = i; }) : Promise.resolve();
+    return Promise.all([p, padP]);
+  };
+  // background preload of later zones (non-blocking)
+  P._preloadRest = function () {
+    const rest = ["planet_gas.png", "planet_moon.png", "planet_ringed.png", "comet.png", "ember.png"];
+    ZONES.forEach((z) => { rest.push(z.tile); if (z.body) rest.push(z.body); });
+    TRANS.forEach((t) => rest.push(t));
+    for (let z = 1; z <= 6; z++) {
+      rest.push("parallax/decor-gas-z" + z + ".png", "parallax/decor-moon-z" + z + ".png", "parallax/setpiece-station-z" + z + ".png");
+      for (let i = 0; i < 8; i++) rest.push("parallax/decor-planets/z" + z + "-mid-" + i + ".png");
+      for (let i = 0; i < 4; i++) rest.push("parallax/decor-planets/z" + z + "-far-" + i + ".png");
+    }
+    for (let i = 0; i < 5; i++) rest.push("zones/ice-hazard-variants/asteroid_" + i + ".png");
+    ["hazard-station","hazard-telescope","hazard-satellite","hazard-wreckage_0","hazard-wreckage_1","hazard-wreckage_2"].forEach((n) => rest.push(n + ".png"));
+    let i = 0; const next = () => { if (i >= rest.length) return; const r = rest[i++]; this._get(r); this.img[r].p.then(next); };
+    next(); next(); next();
+  };
+
+  P._layout = function () {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cw = window.innerWidth, ch = window.innerHeight;
+    this.cssW = cw; this.cssH = ch; this.dpr = dpr;
+    this.canvas.width = Math.round(cw * dpr); this.canvas.height = Math.round(ch * dpr);
+    let s = ch / WORLD_H, viewW = cw / s;
+    if (viewW < MIN_VIEW_W) { s = cw / MIN_VIEW_W; viewW = MIN_VIEW_W; }
+    this.s = s; this.viewW = viewW;
+    this.bandH = WORLD_H * s;
+    this.oy = Math.round((ch - this.bandH) / 2);
+    this.letterbox = this.oy > 4;
+    this.hs = clamp(s * 1.15, 0.62, 1);             // HUD css px per design px
+    if (this.o.onLayout) this.o.onLayout({ oy: this.oy, bandH: this.bandH, letterbox: this.letterbox, hs: this.hs, cssW: cw, cssH: ch });
+    this.ctx.imageSmoothingEnabled = false;
+  };
+
+  /* ---- run setup ---- */
+  // sprites: { rocket, post, payload (canvas|null), packKey, mode } built by prepareStack()
+  P.start = function (cfg) {
+    this.cfg = cfg;
+    this.sp = cfg.sprites;
+    this.chain = buildChain(this.sp.rocket);
+    this.chainPost = this.sp.post ? buildChain(this.sp.post) : this.chain;
+    this.seed = cfg.seed >>> 0 || 1; this._r = this.seed;
+    this.t = 0; this.phase = "climb"; this.phaseT = 0;
+    this.cam = -1; this.camY = 2160; this.speed = 0; this.dist = 0; // dist = world px since km 0
+    this.px = 640; this.py = 430; this.vy = 0; this.tilt = -Math.PI / 2; this.holding = false; this._botHold = false;
+    this.fuel = 1; this.coins = 0; this.deployed = false; this.deployKm = 0; this.bonus = 0; this.deployT = -1;
+    this.crashed = false; this.crashT = 0; this.shield = false; this.shieldGrace = 0; this.magnetT = 0;
+    this.nextGateX = 900; this.gateN = 0; this.lastGapC = 360; this.nextExtraX = 1200;
+    this.planetBlock = { top0: 0, top1: -1, topY: 0, bot0: 0, bot1: -1, botY: 720 };
+    this.zoneIdx = 0; this.bannerT = -10; this.bannerZone = 0; this.comet = { on: false, x: 0, y: 0 }; this.cometZone = -1;
+    this.nextDecorX = 0; this.popT = -10; this.gameOverFired = false; this.result = null; this.events.length = 0;
+    this.bodyY = 720; this.accum = 0; this.lastTs = 0; this.fps = []; this._flash = 0;
+    for (const a of [this.haz, this.pick, this.fx, this.decor]) for (const o of a) o.on = false;
+    for (const d of this.dust) { d.x = this._rand() * 1600; d.y = 40 + this._rand() * 640; }
+    this.bot = cfg.bot || null;
+    this.running = true; this.paused = false;
+    this.canvas.style.display = "block";
+    this._layout();
+    this._preloadRest();
+    this._audioStart();
+    if (!this.captureMode) { this.lastTs = 0; this._raf = requestAnimationFrame(this._boundFrame); }
+    else this._draw();
+  };
+  P._rand = function () { // mulberry32 (deterministic per seed)
+    let t = (this._r = (this._r + 0x6D2B79F5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  P.stop = function () {
+    this.running = false; cancelAnimationFrame(this._raf);
+    this._audioStop(0.2);
+    this.canvas.style.display = "none";
+  };
+
+  /* ---- audio (shares the liftoff AudioContext + master chain; synth only) ---- */
+  P._audioStart = function () {
+    this.voice = null;
+    const a = this.o.getAudio && this.o.getAudio(), RA = global.RocketBayAudio;
+    this._log("flight", 0);
+    if (!a || !RA || this.captureMode) return;
+    try { this.voice = RA.flightVoice(a.ctx, a.chain.input, a.ctx.currentTime + 0.02); this.voice.setThrust(true, a.ctx.currentTime); } catch (e) { this.voice = null; }
+  };
+  P._audioStop = function (fade) { if (this.voice) { try { this.voice.stop(0, fade); } catch (_) {} this.voice = null; } };
+  P._sfx = function (kind) {
+    this._log(kind, this.t);
+    const a = this.o.getAudio && this.o.getAudio(), RA = global.RocketBayAudio;
+    if (!a || !RA || this.captureMode) return;
+    const t = a.ctx.currentTime + 0.005;
+    try { if (kind === "deploy") RA.deployPop(a.ctx, a.chain.input, t); else if (kind === "crash") { RA.crashBoom(a.ctx, a.chain.input, t); this._audioStop(0.25); } } catch (_) {}
+  };
+  P._log = function (type, t, on) { if (this.events.length < 4000) this.events.push({ type: type, t: +t.toFixed(4), on: on }); };
+
+  /* ---- input ---- */
+  P.setHold = function (on) {
+    on = !!on;
+    if (on === this.holding) return;
+    this.holding = on;
+  };
+  P.canDeploy = function () { return this.running && this.phase === "flight" && !this.crashed && !this.deployed && this.km() >= DEPLOY_MIN_KM; };
+  P.deploy = function () {
+    if (!this.canDeploy()) return false;
+    this.deployed = true; this.deployKm = Math.floor(this.km()); this.bonus = bonusFor(this.deployKm); this.deployT = this.t; this.popT = this.t;
+    this._sfx("deploy");
+    return true;
+  };
+  P.km = function () { return Math.max(0, this.dist * KM_PER_PX); };
+  P.setPaused = function (p) {
+    if (!this.running || this.crashed && this.gameOverFired) return;
+    this.paused = !!p;
+    const a = this.o.getAudio && this.o.getAudio();
+    if (a && !this.captureMode) { try { if (this.paused) a.ctx.suspend(); else a.ctx.resume(); } catch (_) {} }
+    if (!this.paused) this.lastTs = 0;
+    this._draw();
+  };
+
+  /* ---- loop ---- */
+  P._frame = function (ts) {
+    if (!this.running) return;
+    this._raf = requestAnimationFrame(this._boundFrame);
+    if (!this.lastTs) { this.lastTs = ts; this._draw(); return; }
+    let dt = (ts - this.lastTs) / 1000; this.lastTs = ts;
+    if (this.paused) return;
+    if (this.fps.length < 20000) this.fps.push(dt);
+    if (dt > 0.1) dt = 0.1;
+    this.accum += dt;
+    while (this.accum >= SIM_DT) { this._step(SIM_DT); this.accum -= SIM_DT; }
+    this._draw();
+  };
+  P.captureStep = function (dt) { // deterministic capture: advance dt with fixed sub-steps, then draw
+    if (!this.running) return;
+    this.accum += dt;
+    while (this.accum >= SIM_DT - 1e-9) { this._step(SIM_DT); this.accum -= SIM_DT; }
+    this._draw();
+  };
+
+  P._step = function (dt) {
+    this.t += dt; this.phaseT += dt;
+    if (this.bot) this._botStep();
+    const hold = this.bot ? this._botHold : this.holding;
+    if (this.phase === "climb") {
+      const u = this.phaseT / CLIMB_T;
+      this.camY = 2160 * (1 - ease(u));
+      if (this.phaseT >= CLIMB_T) { this.phase = "pitch"; this.phaseT = 0; this.camY = 0; this.cam = -180; }
+      return;
+    }
+    if (this.phase === "pitch") {
+      const u = clamp(this.phaseT / PITCH_T, 0, 1);
+      this.speed = SPEED0 * ease(u);
+      this.cam += this.speed * dt;
+      this.px = 640 + (PLAYER_X - 640) * ease(u);
+      this.tilt = -Math.PI / 2 * (1 - ease(u));
+      this.bodyY = 720 + (105 - 720) * easeOut(u);
+      if (this.phaseT >= PITCH_T) { this.phase = "flight"; this.phaseT = 0; this.cam = 0; this.dist = 0; this.px = PLAYER_X; this.tilt = 0; this._log("thrust", this.t, hold); this._lastHold = hold; }
+      return;
+    }
+    // ---- flight / crash ----
+    if (this.crashed) {
+      this.crashT += dt;
+      this.speed = Math.max(0, this.speed * (1 - clamp(this.crashT / 0.53, 0, 1)));
+      this.cam += this.speed * dt; this.dist = this.cam;
+      if (this.crashT >= GAMEOVER_AT && !this.gameOverFired) { this.gameOverFired = true; this._gameOver(); }
+      this._stepObjects(dt);
+      return;
+    }
+    const light = this.deployed;
+    this.speed = Math.min(SPEED_CAP, SPEED0 + SPEED_RAMP * this.phaseT);
+    this.cam += this.speed * dt; this.dist = this.cam;
+    const thrusting = hold && this.fuel > 0;
+    if (thrusting !== this._lastHold) { this._lastHold = thrusting; this._log("thrust", this.t, thrusting); if (this.voice) { const a = this.o.getAudio(); this.voice.setThrust(thrusting, a.ctx.currentTime); } }
+    const g = GRAVITY * (light ? LIGHT_GRAVITY : 1), th = THRUST * (light ? LIGHT_THRUST : 1);
+    this.vy += (g - (thrusting ? th : 0)) * dt;
+    this.vy = clamp(this.vy, -VY_MAX, VY_MAX);
+    this.py += this.vy * dt;
+    if (thrusting) this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * (light ? LIGHT_FUEL : 1) * dt);
+    const tt = (this.vy / VY_MAX) * TILT_MAX, k = TILT_RATE * (light ? LIGHT_TILT : 1);
+    this.tilt += (tt - this.tilt) * Math.min(1, k * dt);
+    if (this.shieldGrace > 0) this.shieldGrace -= dt;
+    if (this.magnetT > 0) this.magnetT -= dt;
+    // earth limb drops out over 0-600 km; zone edge bodies slide per zone
+    this._spawn();
+    this._stepObjects(dt);
+    this._collide();
+    // zone banner (zone index follows the art strip so the banner lands at the transition's end)
+    const U = this._artU(), z = Math.floor(U / SEG);
+    if (z !== this.zoneIdx) { this.zoneIdx = z; this.bannerT = this.t; this.bannerZone = mod(z, 6); this.cometZone = -1; }
+  };
+  P._artU = function () { return PAR.zone * this.cam + this._u0(); };
+  P._u0 = function () { return Math.max(0, (1280 - this.viewW) / 2); };
+
+  /* ---- world generation (deterministic per seed; RNG order independent of screen size) ---- */
+  P._tier = function () { const s = this.speed; for (let i = 0; i < TIERS.length; i++) if (s <= TIERS[i].max) return TIERS[i]; return TIERS[3]; };
+  P._zoneAtX = function (wx) { return mod(Math.floor((PAR.zone * wx + 260) / SEG), 6); };
+  P._spawn = function () {
+    const ahead = this.cam + Math.max(this.viewW, 1600) + 260;
+    while (this.nextGateX < ahead) this._gate(this.nextGateX);
+    // decor (mid 0.5x / far 0.2x) - spawn in their own parallax space
+    while (this.nextDecorX < this.cam * PAR.mid + this.viewW + 200) this._decor();
+  };
+  P._hazard = function (name, x, y, drawW, par, vx, vy, zone) {
+    let h = null; for (let i = 0; i < this.haz.length; i++) if (!this.haz[i].on) { h = this.haz[i]; break; }
+    if (!h) return null;
+    const m = SPR[name], sc = drawW / m[0];
+    const rel = (zone === 4 && name.indexOf("asteroid") === 0) ? "zones/ice-hazard-variants/" + name + ".png" : name + ".png";
+    h.on = true; h.im = rel; h.x = x; h.y = y; h.vx = vx || 0; h.vy = vy || 0; h.par = par || 1;
+    h.r = m[4] * sc; h.dw = m[0] * sc; h.dh = m[1] * sc; h.ox = m[2] * sc; h.oy = m[3] * sc; h.rot = 0;
+    return h;
+  };
+  P._pickup = function (kind, x, y) { // kind: 0 coin, 1 fuel, 2 shield, 3 magnet, 4 gem
+    let p = null; for (let i = 0; i < this.pick.length; i++) if (!this.pick[i].on) { p = this.pick[i]; break; }
+    if (!p) return;
+    const name = kind === 0 ? "coin_f0" : kind === 1 ? "fuel" : kind === 2 ? "shield" : kind === 3 ? "magnet" : "gem";
+    const m = SPR[name], sc = (kind === 0 ? 34 : 46) / m[1];
+    p.on = true; p.kind = kind; p.x = x; p.y = y; p.r = m[4] * sc; p.ph = this._rand() * 5;
+    p.im = name + ".png"; p.dw = m[0] * sc; p.dh = m[1] * sc; p.ox = m[2] * sc; p.oy = m[3] * sc; p.sc = sc;
+  };
+  P._gate = function (gx) {
+    // Escape-gap LOCK (Ateeb): every wall leaves >=1 gap that tightens with distance.
+    // Spacing (v1.3.1): SPREAD is the default (1-2 hazards, 180-320 px hx); dense 2-3 packs ~20%.
+    const T = this._tier(), R = () => this._rand();
+    const zone = this._zoneAtX(gx), Z = ZONES[zone];
+    this.gateN++;
+    // gap height: tier floor, also never above GAP_START; eases toward rocket+margin as speed rises
+    const u = clamp((this.speed - SPEED0) / (SPEED_CAP - SPEED0), 0, 1);
+    const gapFloor = T.gap;                                      // 300 / 265 / 235 / 210
+    const gapH = Math.max(gapFloor, Math.round(GAP_START + (gapFloor - GAP_START) * u)) + Math.floor(R() * 30);
+    let lo = gapH / 2 + 34, hi = WORLD_H - gapH / 2 - 34;
+    const pb = this.planetBlock;
+    if (gx >= pb.top0 && gx <= pb.top1) lo = Math.max(lo, pb.topY + gapH / 2 + 30);
+    if (gx >= pb.bot0 && gx <= pb.bot1) hi = Math.min(hi, pb.botY - gapH / 2 - 30);
+    if (lo > hi) { const m = (lo + hi) / 2; lo = hi = m; }
+    let c = this.lastGapC + (R() * 2 - 1) * T.shift;
+    c = clamp(c, Math.max(lo, this.lastGapC - T.shift), Math.min(hi, this.lastGapC + T.shift));
+    if (c < lo || c > hi) c = clamp(c, lo, hi);
+    const g0 = c - gapH / 2, g1 = c + gapH / 2;
+    // layout
+    const cluster = R() < CLUSTER_P;
+    const n = cluster ? (2 + (R() < 0.5 ? 1 : 0)) : (1 + (R() < 0.55 ? 1 : 0)); // spread 1-2, cluster 2-3
+    const pool = DEBRIS_MIX[zone];
+    const pickName = () => pool[Math.floor(R() * pool.length)];
+    const drawWFor = (name) => {
+      if (DEBRIS_DRAW[name] != null) return DEBRIS_DRAW[name] * (0.9 + R() * 0.2);
+      // asteroid
+      return (Z.small ? 44 + R() * 26 : 50 + R() * 70);
+    };
+    // place a piece fully OUTSIDE the escape lane [g0, g1]; returns false if no room
+    const place = (name, x, preferSide) => {
+      const w = drawWFor(name), m = SPR[name]; if (!m) return false;
+      const sc = w / m[0], rr = m[4] * sc, visR = rr / 0.8;
+      // side: -1 above gap, +1 below; soft middle-bias for the blocking mass (0.2/0.6/0.2)
+      let side = preferSide;
+      if (side == null) {
+        const b = R();
+        side = b < 0.2 ? -1 : b < 0.8 ? (c < WORLD_H / 2 ? 1 : -1) : (R() < 0.5 ? -1 : 1);
+      }
+      const edgePad = visR + 8;
+      let cy;
+      if (side < 0) {
+        const maxY = g0 - visR - 4;
+        if (maxY < edgePad) return false;
+        // bias toward the gap edge (reads as a wall) but keep separation
+        cy = maxY - R() * Math.min(110, maxY - edgePad);
+      } else {
+        const minY = g1 + visR + 4;
+        if (minY > WORLD_H - edgePad) return false;
+        cy = minY + R() * Math.min(110, WORLD_H - edgePad - minY);
+      }
+      // soft bias: nudge off any nearby decor planet centre (v1.2.1 ~25% max overlap at spawn)
+      for (let i = 0; i < this.decor.length; i++) {
+        const d = this.decor[i]; if (!d.on) continue;
+        const dx = (d.x - this.cam * d.par) - (x - this.cam);
+        if (Math.abs(dx) > 120) continue;
+        if (Math.abs(d.y - cy) < 50) cy += (cy < d.y ? -1 : 1) * 40;
+      }
+      cy = clamp(cy, edgePad, WORLD_H - edgePad);
+      // final lane check (never invade the escape gap)
+      if (cy + visR > g0 && cy - visR < g1) return false;
+      this._hazard(name, x, cy, w, 1, 0, 0, zone);
+      return true;
+    };
+    // horizontal layout
+    if (cluster) {
+      // tight pack on ONE side of the gap; pieces share ~40-70 px hx
+      const side = R() < 0.5 ? -1 : 1;
+      let x0 = gx - (n - 1) * 30;
+      for (let i = 0; i < n; i++) {
+        place(pickName(), x0 + i * (40 + R() * 30), side);
+      }
+    } else if (n === 1) {
+      place(pickName(), gx + (R() * 2 - 1) * 20, null);
+    } else {
+      // two pieces, loose hx 180-320; prefer opposite sides of the lane
+      const hx = SPREAD_HX[0] + R() * (SPREAD_HX[1] - SPREAD_HX[0]);
+      const side0 = R() < 0.5 ? -1 : 1;
+      place(pickName(), gx - hx * 0.35, side0);
+      place(pickName(), gx + hx * 0.35, -side0);
+    }
+    // bookkeeping for autopilot / evidence
+    if (!this.gates) this.gates = [];
+    if (this.gates.length > 24) this.gates.shift();
+    this.gates.push({ x: gx, c: c, gapH: gapH, n: n, cluster: cluster, g0: g0, g1: g1 });
+
+    // planet (big slow 0.7x) — unchanged; blocks later gaps
+    const mix = Z.mix;
+    if (mix.planet > 0 && R() < 0.22 * mix.planet && this.gateN > 2) {
+      const pk = R(), name = zone === 3 ? (pk < 0.5 ? "planet_ringed" : "planet_moon") : (pk < 0.6 ? "planet_gas" : "planet_moon");
+      const drawW = name === "planet_ringed" ? 420 + R() * 100 : name === "planet_gas" ? 220 + R() * 100 : 140 + R() * 80;
+      const m = SPR[name], r = m[4] * (drawW / m[0]);
+      const top = R() < 0.5, cy = top ? -r * 0.35 : WORLD_H + r * 0.35;
+      const lead = gx + T.spacing * 1.5;
+      const camAt = lead - PLAYER_X;
+      const xp = PAR.planets * camAt + PLAYER_X;
+      const gA = (xp - PLAYER_X - r - 60) / PAR.planets + PLAYER_X, gB = (xp - PLAYER_X + r + 60) / PAR.planets + PLAYER_X;
+      if (!(top ? (pb.top1 > gx) : (pb.bot1 > gx))) {
+        this._hazard(name, xp, cy, drawW, PAR.planets, 0, 0, zone);
+        if (top) { pb.top0 = gA; pb.top1 = gB; pb.topY = cy + r; } else { pb.bot0 = gA; pb.bot1 = gB; pb.botY = cy - r; }
+      }
+    }
+    // pickups along the escape lane
+    const prevX = gx - T.spacing, pc = this.lastGapC;
+    if (R() < Math.min(1, T.arcs * T.spacing / 1000)) {
+      const nn = 6 + Math.floor(R() * 5), x0 = prevX + T.spacing * 0.3, step = 36, amp = 30 + R() * 40;
+      for (let i = 0; i < nn; i++) {
+        const uu = i / (nn - 1), x = x0 + i * step, base = pc + (c - pc) * clamp((x - prevX) / T.spacing, 0, 1);
+        this._pickup(0, x, base - Math.sin(uu * Math.PI) * amp);
+      }
+    }
+    if (this.gateN % T.fuelN === 0) this._pickup(1, gx, c);
+    else {
+      const q = R();
+      if (q < T.shield) this._pickup(2, gx, c);
+      else if (q < T.shield + T.magnet) this._pickup(3, gx, c);
+      else if (q < T.shield + T.magnet + T.gem) this._pickup(4, gx, c);
+    }
+    // extras between gates (comet / ember / stray rock) — still leave the lane clear
+    const extraN = T.extra * T.spacing / 1000 * 0.25 * (mix.asteroid + mix.comet + mix.ember);
+    let nE = Math.floor(extraN) + (R() < extraN % 1 ? 1 : 0);
+    for (let e = 0; e < nE; e++) {
+      const x = prevX + T.spacing * (0.35 + R() * 0.3);
+      const path = pc + (c - pc) * clamp((x - prevX) / T.spacing, 0, 1);
+      const typeR = R() * (mix.asteroid + mix.comet + mix.ember + 0.001);
+      if (typeR < mix.asteroid) {
+        const name = pickName();
+        const w = drawWFor(name), m = SPR[name], rr = m[4] * (w / m[0]);
+        const side = R() < 0.5 ? -1 : 1, off = gapH * 0.5 + rr + 30 + R() * 80;
+        const y = path + side * off;
+        if (y - rr > 0 && y + rr < WORLD_H) this._hazard(name, x, y, w, 1, 0, 0, zone);
+      } else if (typeR < mix.asteroid + mix.comet) {
+        const w = 120 + R() * 50; this._hazard("comet", x + 420, -60 - R() * 120, w, 1, -170, 150, zone);
+      } else {
+        const w = 48 + R() * 24; this._hazard("ember", x + 160, -40 - R() * 160, w, 1, -20, 70 + R() * 40, zone);
+      }
+    }
+    this.lastGapC = c;
+    this.nextGateX = gx + T.spacing;
+  };
+
+  P._decor = function () {
+    const R = () => this._rand();
+    const wx = this.nextDecorX;
+    let d = null; for (let i = 0; i < this.decor.length; i++) if (!this.decor[i].on) { d = this.decor[i]; break; }
+    const zone = this._zoneAtX(wx / PAR.mid) + 1;
+    if (d) {
+      const q = R();
+      if (q < 0.12) { d.im = "parallax/setpiece-station-z" + zone + ".png"; d.par = PAR.mid; d.w = 184; d.h = 80; d.y = 200 + R() * 260; }
+      else if (q < 0.62) { d.im = "parallax/decor-planets/z" + zone + "-mid-" + Math.floor(R() * 8) + ".png"; d.par = PAR.mid; d.w = 0; d.h = 0; d.y = 84 + R() * 520; }
+      else if (q < 0.8) { d.im = "parallax/decor-planets/z" + zone + "-far-" + Math.floor(R() * 4) + ".png"; d.par = PAR.farPlanets; d.w = 0; d.h = 0; d.y = 84 + R() * 520; }
+      else { d.im = "parallax/decor-" + (R() < 0.5 ? "gas" : "moon") + "-z" + zone + ".png"; d.par = PAR.mid; d.w = 0; d.h = 0; d.y = 84 + R() * 520; }
+      d.on = true;
+      d.x = d.par === PAR.mid ? wx : (wx / PAR.mid) * PAR.farPlanets + 100; // x in its own parallax space
+    }
+    this.nextDecorX = wx + 300 + R() * 360;
+  };
+
+  P._stepObjects = function (dt) {
+    const cam = this.cam;
+    for (let i = 0; i < this.haz.length; i++) {
+      const h = this.haz[i]; if (!h.on) continue;
+      h.x += h.vx * dt; h.y += h.vy * dt;
+      const sx = h.x - cam * h.par;
+      if (sx < -h.dw - 300 || h.y > WORLD_H + 400) h.on = false;
+    }
+    const mag = this.magnetT > 0 && !this.crashed;
+    for (let i = 0; i < this.pick.length; i++) {
+      const p = this.pick[i]; if (!p.on) continue;
+      p.ph += dt * 10;
+      if (mag && p.kind === 0) {
+        const dx = cam + this.px - p.x, dy = this.py - p.y, d2 = dx * dx + dy * dy;
+        if (d2 < MAGNET_R * MAGNET_R) { const d = Math.sqrt(d2) || 1; p.x += dx / d * 520 * dt; p.y += dy / d * 520 * dt; }
+      }
+      if (p.x - cam < -120) p.on = false;
+    }
+    for (let i = 0; i < this.fx.length; i++) {
+      const f = this.fx[i]; if (!f.on) continue;
+      f.t += dt; if (f.t >= f.life) { f.on = false; continue; }
+      f.x += f.vx * dt; f.y += f.vy * dt;
+    }
+    for (let i = 0; i < this.decor.length; i++) { const d = this.decor[i]; if (d.on && d.x - cam * d.par < -260) d.on = false; }
+    if (this.comet.on) { this.comet.x += 520 * dt; this.comet.y += 92 * dt; if (this.comet.x > this.viewW + 200) this.comet.on = false; }
+    else if (this.cometZone !== this.zoneIdx && this.phase === "flight" && this.phaseT > 3) {
+      this.cometZone = this.zoneIdx;
+      if (this._rand() < 0.3) { this.comet.on = true; this.comet.x = -180; this.comet.y = 60 + this._rand() * 200; }
+    }
+  };
+  P._spark = function (x, y, c, n, spd) {
+    for (let k = 0; k < n; k++) {
+      let f = null; for (let i = 0; i < this.fx.length; i++) if (!this.fx[i].on) { f = this.fx[i]; break; }
+      if (!f) return;
+      const a = this._rand() * Math.PI * 2, v = spd * (0.4 + this._rand() * 0.6);
+      f.on = true; f.kind = 0; f.x = x; f.y = y; f.vx = Math.cos(a) * v; f.vy = Math.sin(a) * v; f.t = 0; f.life = 0.35 + this._rand() * 0.25; f.c = c;
+    }
+  };
+
+  P._playerNodes = function () {
+    const ch = (this.deployed && this.deployT >= 0 && this.t - this.deployT > DEPLOY_FRAME_S * 8) ? this.chainPost : this.chain;
+    const spr = this.sp.rocket, cx = spr.w / 2, cy = spr.axisY;
+    const c = Math.cos(this.tilt), s = Math.sin(this.tilt);
+    for (let i = 0; i < 7; i++) {
+      const n = ch[i], dx = n.x - cx, dy = n.y - cy, o = this.nodesW[i];
+      o.x = this.px + c * dx - s * dy; o.y = this.py + s * dx + c * dy; o.r = n.r;
+    }
+    return this.nodesW;
+  };
+  P._collide = function () {
+    const N = this._playerNodes(), cam = this.cam;
+    // band edges
+    for (let i = 0; i < 7; i++) { const n = N[i]; if (n.y - n.r < 0 || n.y + n.r > WORLD_H) { this._crash(i, n.y < 360 ? -1 : 1); return; } }
+    for (let j = 0; j < this.haz.length; j++) {
+      const h = this.haz[j]; if (!h.on) continue;
+      const hx = h.x - cam * h.par; // screen-space (design) x
+      if (hx + h.r < this.px - 130 || hx - h.r > this.px + 130) continue;
+      for (let i = 0; i < 7; i++) {
+        const n = N[i], dx = n.x - hx, dy = n.y - h.y, rr = n.r + h.r;
+        if (dx * dx + dy * dy < rr * rr) {
+          if (this.shieldGrace > 0) break;
+          if (this.shield) { this.shield = false; this.shieldGrace = SHIELD_GRACE; h.on = false; this._spark(hx, h.y, 1, 14, 260); break; }
+          this._crash(i, 0); return;
+        }
+      }
+    }
+    for (let j = 0; j < this.pick.length; j++) {
+      const p = this.pick[j]; if (!p.on) continue;
+      const pxs = p.x - cam;
+      if (pxs + p.r < this.px - 130 || pxs - p.r > this.px + 130) continue;
+      for (let i = 0; i < 7; i++) {
+        const n = N[i], dx = n.x - pxs, dy = n.y - p.y, rr = n.r + p.r;
+        if (dx * dx + dy * dy < rr * rr) {
+          p.on = false;
+          if (p.kind === 0) this.coins = Math.min(100000, this.coins + 1);
+          else if (p.kind === 1) this.fuel = Math.min(1, this.fuel + FUEL_REFILL);
+          else if (p.kind === 2) this.shield = true;
+          else if (p.kind === 3) this.magnetT = MAGNET_S;
+          else this.coins = Math.min(100000, this.coins + GEM_COINS);
+          this._spark(pxs, p.y, p.kind === 1 ? 2 : 0, 6, 140);
+          break;
+        }
+      }
+    }
+  };
+  P._crash = function (nodeIdx, edge) {
+    if (this.crashed) return;
+    this.crashed = true; this.crashT = 0; this.crashEdge = edge;
+    // crash point = the nose (pack frames put it at (230,150))
+    const spr = this.sp.rocket, c = Math.cos(this.tilt), s = Math.sin(this.tilt), dx = spr.w / 2 - 4;
+    this.crashX = this.px + c * dx; this.crashY = this.py + s * dx;
+    this.crashTilt = this.tilt;
+    this._sfx("crash");
+    if (this.o.onCrash) this.o.onCrash();
+  };
+  P._gameOver = function () {
+    const distanceKm = Math.floor(this.km());
+    const r = {
+      distanceKm, deployed: this.deployed, deployKm: this.deployed ? this.deployKm : 0, bonus: this.deployed ? this.bonus : 0,
+      coins: this.coins, coinPts: this.coins * COIN_PTS,
+      result: this.deployed ? "SUCCESS" : "FAILED",
+    };
+    // deploy is only possible after 300 km and before the crash, so deployKm <= distanceKm holds
+    r.score = scoreFor(r.distanceKm, r.bonus, r.coins);
+    this.result = r;
+    this._log("end", this.t);
+    this._audioStop(0.3);
+    if (this.o.onGameOver) this.o.onGameOver(r);
+  };
+
+  /* ---- autopilot (capture / perf runs only: ?bot=1 or capture API) ---- */
+  P._botStep = function () {
+    const b = this.bot;
+    if (this.phase !== "flight" || this.crashed) { this._botHold = false; return; }
+    const km = this.km();
+    if (b.deployAtKm && !this.deployed && km >= b.deployAtKm) this.deploy();
+    if (b.crashAtKm && km >= b.crashAtKm) { // stop flying: drift down into the next wall / the edge
+      this._botHold = b.crashMode === "up"; return;
+    }
+    // target: gap centre of the next gate ahead of the nose; dodge any hazard on the predicted line
+    let target = this.lastGapC;
+    const wx = this.cam + this.px;
+    let best = 1e9;
+    for (let i = 0; i < this.gates.length; i++) { const g = this.gates[i]; if (g.x > wx - 40 && g.x < best) { best = g.x; target = g.c; } }
+    // coins + fuel slightly pull the target
+    const py = this.py + this.vy * 0.16 + 0.5 * (GRAVITY * (this.deployed ? LIGHT_GRAVITY : 1)) * 0.0;
+    let dodge = 0;
+    for (let j = 0; j < this.haz.length; j++) {
+      const h = this.haz[j]; if (!h.on) continue;
+      const hx = h.x - this.cam * h.par, ahead = hx - this.px;
+      if (ahead < -60 || ahead > 300) continue;
+      const tAhead = Math.max(0, ahead) / Math.max(1, this.speed), yh = h.y + h.vy * tAhead;
+      const yp = this.py + this.vy * tAhead;
+      if (Math.abs(yp - yh) < h.r + 34) dodge += (yp < yh ? -1 : 1) * (h.r + 60);
+    }
+    target += dodge;
+    this._botHold = py > target + 4;
+  };
+
+  /* ---------------- rendering ---------------- */
+  P._draw = function () {
+    const x = this.ctx, s = this.s * this.dpr, oy = this.oy * this.dpr, VW = this.viewW;
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.imageSmoothingEnabled = false;
+    x.fillStyle = "#050a18"; x.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    x.setTransform(s, 0, 0, s, 0, oy);
+    if (this.letterbox) this._drawLetterbox(x, s, oy);
+    x.save(); x.beginPath(); x.rect(0, 0, VW, WORLD_H); x.clip();
+    if (this.phase === "climb" || (this.phase === "pitch" && this.phaseT < 0.0001)) this._drawClimb(x);
+    else this._drawFlight(x);
+    x.restore();
+    if (this.letterbox) { // band edges = crash lines
+      x.fillStyle = "rgba(100,210,255,0.55)"; x.fillRect(0, -3, VW, 3); x.fillRect(0, WORLD_H, VW, 3);
+    }
+    this._drawHud(x);
+  };
+  P._drawLetterbox = function (x) {
+    // dim mirrored continuation of the zone art above/below the play band (not playable)
+    const VW = this.viewW, ext = this.oy / this.s + 4;
+    if (this.phase !== "climb") {
+      const U = this._artU();
+      x.save(); x.scale(1, -1); this._strip(x, U, VW, 0, 1); x.restore();
+      x.save(); x.translate(0, 2 * WORLD_H); x.scale(1, -1); this._strip(x, U, VW, 0, 1); x.restore();
+    }
+    x.fillStyle = "rgba(5,10,24,0.72)"; x.fillRect(0, -ext, VW, ext); x.fillRect(0, WORLD_H, VW, ext);
+  };
+  // zone art strip at 0.25x: [tile 2560][transition 1280] per zone, looping 6 -> 1
+  P._strip = function (x, U, VW, y, zoom) {
+    let sx = 0, u = Math.floor(U);
+    const lim = VW / zoom;
+    while (sx < lim) {
+      const k = Math.floor(u / SEG), o = u - k * SEG, z = mod(k, 6);
+      let w, im;
+      if (o < SEG_TILE) {
+        im = this._get(ZONES[z].tile);
+        const tw = im ? im.width : 2560, col = o % tw;
+        w = Math.min(tw - col, SEG_TILE - o, Math.ceil(lim - sx));
+        if (im) x.drawImage(im, col, 0, w, 720, sx * zoom, y, w * zoom, 720 * zoom);
+        else { x.fillStyle = "#0b1430"; x.fillRect(sx * zoom, y, w * zoom, 720 * zoom); }
+      } else {
+        im = this._get(TRANS[z]);
+        const col = o - SEG_TILE;
+        w = Math.min(SEG_TRANS - col, Math.ceil(lim - sx));
+        if (im) x.drawImage(im, col, 0, w, 720, sx * zoom, y, w * zoom, 720 * zoom);
+        else { x.fillStyle = "#0b1430"; x.fillRect(sx * zoom, y, w * zoom, 720 * zoom); }
+      }
+      sx += w; u += w;
+    }
+  };
+  P._drawClimb = function (x) {
+    // world column [orbit tile 720 | climb bridge 1440 | pad plate 720]; camera top 2160 -> 0
+    const VW = this.viewW, colScale = Math.max(1, VW / 1280), ox = (VW - 1280 * colScale) / 2;
+    const u = this.phaseT / CLIMB_T;
+    const z = 1 + 1.25 * (1 - ease(u / 0.25));      // pad scale -> flight scale in the first 0.6 s
+    const rx = VW / 2, ry = 430;
+    x.save();
+    x.translate(rx, ry); x.scale(z, z); x.translate(-rx, -ry);
+    const top = -this.camY * colScale;
+    const orbit = this._get("bg-orbit-edge-tile.png"), bridge = this._get("climb-bridge-" + this.cfg.tod + ".png");
+    if (orbit) x.drawImage(orbit, ox, top, 1280 * colScale, 720 * colScale);
+    if (bridge) x.drawImage(bridge, ox, top + 720 * colScale, 1280 * colScale, 1440 * colScale);
+    if (this._pad) x.drawImage(this._pad, 0, 0, this._pad.width, this._pad.height, ox, top + 2160 * colScale, 1280 * colScale, 720 * colScale);
+    // rocket nose-up at (VW/2, 430), flame on
+    this._drawRocket(x, rx, ry, -Math.PI / 2, 1, true);
+    x.restore();
+  };
+  P._drawFlight = function (x) {
+    const VW = this.viewW, cam = this.cam;
+    // 1) zone art (0.25x); during pitch-over the climb column's scale eases back to 1
+    const colScale = Math.max(1, VW / 1280);
+    const zoom = this.phase === "pitch" ? colScale + (1 - colScale) * ease(this.phaseT / PITCH_T) : 1;
+    this._strip(x, this._artU(), VW, 0, zoom);
+    // 2) far stars 0.1x (translucent; the pack's luma<90 mask is approximated by alpha)
+    const st = this._get("parallax/far-stars-tile.png");
+    if (st) {
+      x.globalAlpha = 0.5;
+      const off = mod(Math.floor(cam * PAR.stars), 1280);
+      for (let sx = -off; sx < VW; sx += 1280) x.drawImage(st, sx, 0);
+      x.globalAlpha = 1;
+    }
+    // 3) zone edge body (x fixed): earth limb rises in the pitch-over and drops out over 0-600 km
+    this._drawBody(x);
+    // 4) set-piece comet (far layer, own velocity)
+    if (this.comet.on) { const c = this._get("parallax/setpiece-comet.png"); if (c) { x.save(); x.translate(this.comet.x, this.comet.y); x.rotate(0.176); x.drawImage(c, -88, -20); x.restore(); } }
+    // 5) decor: far planets 0.2x, mid decor 0.5x
+    for (let i = 0; i < this.decor.length; i++) {
+      const d = this.decor[i]; if (!d.on) continue;
+      const im = this._get(d.im); if (!im) continue;
+      x.drawImage(im, Math.round(d.x - cam * d.par), Math.round(d.y));
+    }
+    // 6) near dust (1.3x): drawn under the gameplay layer so it never covers sprite or HUD pixels
+    if (this.phase === "flight") {
+      const Z = ZONES[this.bannerZone] || ZONES[0];
+      x.fillStyle = Z.accent; x.globalAlpha = 0.55;
+      const len = clamp(this.speed / 40, 6, 18);
+      for (let i = 0; i < this.dust.length; i++) { const d = this.dust[i], sx = mod(d.x - cam * PAR.dust, VW + 40) - 20; x.fillRect(Math.round(sx), Math.round(d.y), len, 2); }
+      x.globalAlpha = 1;
+    }
+    // 7) gameplay: planets (0.7x) first, then rocks/comets/embers, pickups
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < this.haz.length; i++) {
+        const h = this.haz[i]; if (!h.on || (pass === 0) !== (h.par !== 1)) continue;
+        const im = this._get(h.im); if (!im) continue;
+        const sx = h.x - cam * h.par;
+        if (sx + h.dw < -50 || sx - h.dw > VW + 50) continue;
+        x.drawImage(im, Math.round(sx - h.ox), Math.round(h.y - h.oy), Math.round(h.dw), Math.round(h.dh));
+      }
+    }
+    for (let i = 0; i < this.pick.length; i++) {
+      const p = this.pick[i]; if (!p.on) continue;
+      const sx = p.x - cam; if (sx < -60 || sx > VW + 60) continue;
+      if (p.kind === 0) {
+        const f = Math.floor(p.ph) % 5, m = SPR["coin_f" + f], im = this._get(COIN_IMG[f]); if (!im) continue;
+        x.drawImage(im, Math.round(sx - m[2] * p.sc), Math.round(p.y - m[3] * p.sc), Math.round(m[0] * p.sc), Math.round(m[1] * p.sc));
+      } else {
+        const im = this._get(p.im); if (!im) continue;
+        const bob = Math.sin(p.ph * 0.4) * 3;
+        x.drawImage(im, Math.round(sx - p.ox), Math.round(p.y - p.oy + bob), Math.round(p.dw), Math.round(p.dh));
+      }
+    }
+    // 8) rocket / deploy / crash
+    if (!this.crashed) {
+      if (this.shield || this.shieldGrace > 0) {
+        if (!(this.shieldGrace > 0 && Math.floor(this.t * 12) % 2)) {
+          x.strokeStyle = "rgba(120,220,255,0.8)"; x.lineWidth = 3;
+          x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
+        }
+      }
+      this._drawRocket(x, this.px, this.py, this.tilt, 1, this.phase !== "flight" || (this.bot ? this._botHold : this.holding) && this.fuel > 0);
+    } else this._drawCrash(x);
+    this._drawDeployFx(x);
+    // FX sparks
+    for (let i = 0; i < this.fx.length; i++) {
+      const f = this.fx[i]; if (!f.on) continue;
+      x.fillStyle = f.c === 1 ? "#a0ebff" : f.c === 2 ? "#7cff7c" : "#ffe36a";
+      x.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+    }
+    // crash dim
+    if (this.crashed && this.crashT > CRASH_DIM_AT) { x.fillStyle = "rgba(0,0,0," + (CRASH_DIM * clamp((this.crashT - CRASH_DIM_AT) / CRASH_DIM_RAMP, 0, 1)).toFixed(3) + ")"; x.fillRect(0, 0, VW, WORLD_H); }
+  };
+  const COIN_IMG = ["coin_f0.png", "coin_f1.png", "coin_f2.png", "coin_f3.png", "coin_f4.png"];
+  P._drawBody = function (x) {
+    const VW = this.viewW;
+    let im = null, y = 720;
+    const U = this._artU(), k = Math.floor(U / SEG), o = U - k * SEG, z = mod(k, 6), Z = ZONES[z];
+    if (this.phase === "pitch" || (z === 0 && k === 0)) {
+      im = this._get("earth-limb.png");
+      if (this.phase === "pitch") y = this.bodyY;
+      else y = 105 + (720 - 105) * ease(this.km() / 600);
+      if (o > SEG_TILE) y = 720; // gone by the transition
+    } else if (Z.body) {
+      im = this._get(Z.body);
+      const inU = clamp(o / 1280, 0, 1), outU = clamp((o - SEG_TILE) / 1280 / 0.4, 0, 1);
+      const rest = Z.bodyY;
+      if (z === 0) { y = 105 + (720 - 105) * (1 - easeOut(inU)); } // 6->1 loop: limb slides back in
+      else if (Z.bodySide > 0) y = 720 + (rest - 720) * easeOut(inU) + (720 - rest) * ease(outU);
+      else { const h = im ? im.height : 224; y = -h + h * easeOut(inU) - h * ease(outU); }
+    }
+    if (!im || y >= 720) return;
+    const w = Math.max(1280, VW), ox = (VW - w) / 2;
+    x.drawImage(im, 0, 0, im.width, im.height, Math.round(ox), Math.round(y), w, im.height);
+  };
+  P._drawRocket = function (x, cx, cy, ang, a, flame) {
+    const sp = this.sp, rk = sp.rocket;
+    let im = rk.canvas, w = rk.w, h = rk.h, ay = rk.axisY, fx = 0;
+    let frame = -1;
+    if (this.deployed && this.deployT >= 0) {
+      const dt = this.t - this.deployT; frame = Math.floor(dt / DEPLOY_FRAME_S);
+      if (frame >= 8) { frame = -1; if (sp.postImg) { const pi = this._get(sp.postImg); if (pi) { im = pi; fx = 1; } } else if (sp.post) { im = sp.post.canvas; } }
+    }
+    x.save(); x.translate(cx, cy); x.rotate(ang);
+    if (flame) this._drawFlame(x, -w / 2, 0);
+    if (frame >= 0 && sp.frames) { // pack frames: stack tail at x=0, stack top at origin y
+      const f = this._get(sp.frames[frame]);
+      if (f) x.drawImage(f, -w / 2, -ay - sp.origin[1]);
+      else x.drawImage(im, -w / 2, -ay);
+    } else if (frame >= 0) { // runtime fallback deploy: puff ring + separating payload, post sprite from f1
+      if (frame >= 1 && sp.post) x.drawImage(sp.post.canvas, -w / 2, -ay); else x.drawImage(im, -w / 2, -ay);
+      const nx = w / 2 - (sp.payloadInset || 0);
+      const rr = RING_R[frame];
+      if (rr > 0) {
+        x.fillStyle = frame < 4 ? "#e8eef4" : frame < 6 ? "#b8c2cc" : "#8a939c";
+        for (let k = 0; k < 16; k++) { if ((k + frame) % 3 === 0 && frame > 4) continue; const a2 = k / 16 * Math.PI * 2; x.fillRect(Math.round(nx + Math.cos(a2) * rr * 0.55) - 2, Math.round(Math.sin(a2) * rr) - 2, 4, 4); }
+      }
+      const pd = this._payloadDrawable();
+      if (pd) x.drawImage(pd, Math.round(nx + PAY_FWD[frame] - pd.width / 2), Math.round(-PAY_SIDE[frame] - pd.height / 2));
+      if (frame === 1) { x.fillStyle = "rgba(255,255,230,0.8)"; x.fillRect(nx - 6, -6, 12, 12); }
+    } else if (fx) x.drawImage(im, -w / 2, -ay - sp.origin[1]);
+    else x.drawImage(im, -w / 2, -ay);
+    x.restore();
+  };
+  P._payloadDrawable = function () { const sp = this.sp; if (sp.payload) return sp.payload.canvas; return sp.payloadImg ? this._get(sp.payloadImg) : null; };
+  P._drawFlame = function (x, tailX, y) {
+    const fl = (Math.floor(this.t * 30) % 3);
+    const L = 26 + fl * 5;
+    x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - 6, L, 12);
+    x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - 5, L * 0.72, 10);
+    x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - 3, L * 0.42, 6);
+  };
+  P._drawDeployFx = function (x) {
+    if (!this.deployed || this.deployT < 0) return;
+    const dt = this.t - this.deployT, rel = dt - DEPLOY_FRAME_S * 8;
+    // released payload: +40 px/s forward, fades in 0.5 s with a coin burst
+    const pd = this._payloadDrawable();
+    if (rel >= 0 && rel < 0.5 && pd) {
+      x.globalAlpha = 1 - rel / 0.5;
+      x.drawImage(pd, Math.round(this.px + ROCKET_LEN / 2 + 68 + 40 * rel - pd.width / 2), Math.round(this.py - 22 - pd.height / 2));
+      x.globalAlpha = 1;
+      if (!this._burstDone) { this._burstDone = true; this._spark(this.px + ROCKET_LEN / 2 + 68, this.py - 22, 0, 16, 220); }
+    }
+    if (rel < 0) this._burstDone = false;
+    // "+N BONUS" pop
+    const pt = this.t - this.popT;
+    if (pt >= 0 && pt < 1.6) {
+      const sc = pt < 0.15 ? 0.6 + pt / 0.15 * 0.5 : pt < 0.3 ? 1.1 - (pt - 0.15) / 0.15 * 0.1 : 1;
+      x.save(); x.translate(this.px + 40, this.py - 70 - pt * 24); x.scale(sc, sc);
+      x.globalAlpha = pt > 1.2 ? 1 - (pt - 1.2) / 0.4 : 1;
+      x.font = "bold 38px 'DejaVu Sans', 'Verdana', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+      x.lineWidth = 6; x.strokeStyle = "#0A1C3A"; x.strokeText(this._popText, 0, 0);
+      x.fillStyle = "#7CFF9A"; x.fillText(this._popText, 0, 0);
+      x.restore(); x.globalAlpha = 1;
+    }
+  };
+  P._drawCrash = function (x) {
+    const f = Math.min(7, Math.floor(this.crashT / CRASH_FRAME_S));
+    const fr = this.sp.crash;
+    x.save(); x.translate(this.crashX, this.crashY); x.rotate(this.crashTilt);
+    if (fr) { const im = typeof fr[f] === "string" ? this._get(fr[f]) : fr[f]; if (im) x.drawImage(im, -230, -150); }
+    x.restore();
+  };
+
+  /* ---- HUD (canvas: chips, fuel bar, zone banner; deploy + pause are DOM buttons) ---- */
+  P._chip = function (x, X, Y, W, H) {
+    x.fillStyle = HUD.navy; x.fillRect(X, Y, W, H);
+    x.strokeStyle = HUD.cyan; x.lineWidth = 2; x.strokeRect(X + 1, Y + 1, W - 2, H - 2);
+    x.strokeStyle = HUD.inner; x.lineWidth = 1; x.strokeRect(X + 3.5, Y + 3.5, W - 7, H - 7);
+  };
+  P._drawHud = function (x) {
+    if (this.phase === "climb") return;
+    const hs = this.hs * this.dpr;
+    // HUD anchor: top-left of the band (landscape) or of the screen (portrait letterbox)
+    const top = this.letterbox ? Math.max(8, this.oy - 96 * this.hs - 8) : 8;
+    x.setTransform(hs, 0, 0, hs, 8 * this.dpr, top * this.dpr + (this.letterbox ? 0 : 0));
+    const km = Math.floor(this.km());
+    if (km !== this._hud.km) { this._hud.km = km; this._hud.kmS = km.toLocaleString("en-US") + " km"; }
+    if (this.coins !== this._hud.coins) { this._hud.coins = this.coins; this._hud.coinsS = String(this.coins); }
+    x.font = "bold 22px 'DejaVu Sans', 'Verdana', sans-serif"; x.textBaseline = "middle"; x.textAlign = "left";
+    const kmW = Math.max(150, x.measureText(this._hud.kmS).width + 34);
+    this._chip(x, 6, 6, kmW, 42); x.fillStyle = HUD.text; x.fillText(this._hud.kmS, 22, 28);
+    const cx0 = 6 + kmW + 8, cw = Math.max(96, x.measureText(this._hud.coinsS).width + 70);
+    this._chip(x, cx0, 6, cw, 42);
+    const ci = this._get("coin_f0.png"); if (ci) x.drawImage(ci, cx0 + 10, 14, 25, 26);
+    x.fillStyle = HUD.text; x.fillText(this._hud.coinsS, cx0 + 44, 28);
+    // fuel bar: 10 segments, green > 35 % > amber > 15 % > red
+    this._chip(x, 6, 56, 200, 34);
+    const fi = this._get("fuel.png"); if (fi) x.drawImage(fi, 14, 61, 17, 24);
+    const segs = Math.ceil(this.fuel * 10 - 1e-6), col = this.fuel > 0.35 ? "#4ED45A" : this.fuel > 0.15 ? "#F2B233" : "#E8483A";
+    for (let i = 0; i < 10; i++) { x.fillStyle = i < segs ? col : "#1c2f4c"; x.fillRect(38 + i * 16, 66, 13, 14); }
+    if (this.shield || this.magnetT > 0) {
+      let ix = 214;
+      if (this.shield) { const im = this._get("shield.png"); if (im) x.drawImage(im, ix, 58, 28, 30); ix += 34; }
+      if (this.magnetT > 0) { const im = this._get("magnet.png"); if (im) x.drawImage(im, ix, 58, 29, 30); }
+    }
+    // zone banner: in 0.25 s / hold 1.5 s / out 0.25 s
+    const bt = this.t - this.bannerT;
+    if (bt >= 0 && bt < 2 && this.phase === "flight") {
+      const a = bt < 0.25 ? bt / 0.25 : bt > 1.75 ? (2 - bt) / 0.25 : 1;
+      const Z = ZONES[this.bannerZone];
+      const label = BANNERS[this.bannerZone];
+      x.setTransform(hs, 0, 0, hs, 0, 0);
+      x.font = "bold 22px 'DejaVu Sans', 'Verdana', sans-serif"; x.textAlign = "center";
+      const W = x.measureText(label).width + 70, cxs = this.cssW / this.hs / 2;
+      const by = this.letterbox ? (this.oy / this.hs) + 12 : 10;
+      x.globalAlpha = a;
+      this._chip(x, cxs - W / 2, by, W, 40);
+      x.fillStyle = Z.accent; x.fillRect(cxs - W / 2 + 10, by + 10, 5, 20); x.fillRect(cxs + W / 2 - 15, by + 10, 5, 20);
+      x.fillStyle = HUD.text; x.fillText(label, cxs, by + 21);
+      x.globalAlpha = 1; x.textAlign = "left";
+    }
+    if (this.paused) {
+      x.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      x.fillStyle = "rgba(0,0,0,0.45)"; x.fillRect(0, 0, this.cssW, this.cssH);
+    }
+  };
+  const BANNERS = ZONES.map((z, i) => "ZONE " + (i + 1) + " \u00b7 " + z.name);
+
+  /* ---------------- stack -> flight sprites (once per run) ---------------- */
+  // KIT/MB from index.html. Pack frames when the stack is one of the 4 proven pack stacks,
+  // otherwise runtime equivalents built from the same kit pixels (documented fallback).
+  function prepareStack(KIT, MB, build, base) {
+    base = base || "flight/";
+    const ids = [build.s1, build.upper, build.payload].filter(Boolean);
+    const sides = build.sides ? ["side-booster-left", "side-booster-right"] : null;
+    const L = KIT.lighting, lc = L.tods["05"];            // pack flight sprites are lit with TOD 05
+    const st = MB.composeStack(KIT.pieces, KIT.metas, ids, sides);
+    const lit = MB.light(st, lc, L.kitMean, L.kitStd);
+    const rocket = toFlightSprite(st, lit, null, ROCKET_LEN);
+    const key = ids.join(",") + "|" + (build.sides ? 1 : 0), pack = PACK_STACKS[key] || null;
+    const out = { rocket, post: null, payload: null, frames: null, origin: null, crash: null, packKey: pack ? pack.key : null, mode: "" };
+    // layer index -> piece id: payload layers are the payload piece + its frustum join
+    const isPayloadLayer = (i) => { const Ly = st.layers[i]; return build.payload && (Ly.name === build.payload || (Ly.kind === "frustum" && Ly.joinOf === build.payload)); };
+    if (pack) {
+      out.frames = []; for (let i = 0; i < 8; i++) out.frames.push("deploy/" + pack.key + "/f" + i + ".png");
+      out.origin = pack.origin; out.mode = "pack:" + pack.key;
+      out.postImg = "deploy/" + pack.key + "/post-rocket.png"; out.payloadImg = "deploy/" + pack.key + "/payload.png";
+    }
+    if (build.payload) {
+      out.post = toFlightSprite(st, lit, (i) => !isPayloadLayer(i), ROCKET_LEN);
+      out.post.axisY = rocket.axisY; // same canvas geometry
+      // payload piece on its own (same scale), cropped
+      const pl = toFlightSprite(st, lit, (i) => isPayloadLayer(i), ROCKET_LEN);
+      out.payload = cropAlpha(pl.canvas);
+      out.payloadInset = out.payload ? Math.round(out.payload.w / 2) : 0;
+      if (!pack) out.mode = "runtime:payload-split";
+    } else if (!pack) { out.mode = "runtime:selftopped (generic capsule)"; out.payloadImg = "deploy/steel/payload.png"; }
+    if (pack) out.post = null; // pack post-rocket.png is drawn in frame space
+    out.crash = pack && pack.crash ? CRASH_PACK(pack.key) : buildCrashFrames(rocket);
+    return out;
+  }
+  function CRASH_PACK(key) { const a = []; for (let i = 0; i < 8; i++) a.push("crash/" + key + "/f" + i + ".png"); return a; }
+  function cropAlpha(c) {
+    const x = c.getContext("2d"), d = x.getImageData(0, 0, c.width, c.height).data;
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+    for (let y = 0; y < c.height; y++) for (let X = 0; X < c.width; X++) if (d[(y * c.width + X) * 4 + 3]) { if (X < x0) x0 = X; if (X > x1) x1 = X; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return null;
+    const o = cv(x1 - x0 + 1, y1 - y0 + 1); o.getContext("2d").drawImage(c, -x0, -y0);
+    return { canvas: o, w: o.width, h: o.height };
+  }
+  // Runtime crash frames (same language as the pack's fp_crash_hud: 4-px cells, 17-spike star,
+  // 5 colours, radius 20/42/62/74/80/80/74/64, ordered hole-punching, real-sprite debris). 400x300, nose at (230,150).
+  function buildCrashFrames(spr) {
+    const frames = [], rnd = (() => { let s = 99991; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
+    const deb = []; for (let i = 0; i < 20; i++) { const a = rnd() * Math.PI * 2, v = 30 + rnd() * 70; deb.push({ a, v, sx: Math.floor(rnd() * Math.max(1, spr.w - 10)), sy: Math.floor(spr.axisY - 5 + rnd() * 6), sz: 6 + Math.floor(rnd() * 5), fire: i % 2 }); }
+    const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    for (let f = 0; f < 8; f++) {
+      const c = cv(400, 300), x = c.getContext("2d"); x.imageSmoothingEnabled = false;
+      if (f === 0) { x.drawImage(spr.canvas, 230 - spr.w, 150 - spr.axisY); x.fillStyle = BURST_COL[0]; x.fillRect(226, 146, 8, 8); frames.push(c); continue; }
+      const R = BURST_R[f], hole = (f - 1) / 6 * 0.66;
+      for (let gy = -R; gy <= R; gy += 4) for (let gx = -R; gx <= R; gx += 4) {
+        const d = Math.hypot(gx, gy), ang = Math.atan2(gy, gx), spike = 0.78 + 0.22 * Math.cos(ang * 17);
+        if (d > R * spike) continue;
+        const cell = ((gx / 4) & 3) + (((gy / 4) & 3) << 2);
+        if (BAYER[cell] / 16 < hole) continue;
+        const age = clamp(d / R * 0.8 + f / 9, 0, 0.999);
+        x.fillStyle = BURST_COL[Math.floor(age * 5)];
+        x.fillRect(230 + gx - 2, 150 + gy - 2, 4, 4);
+      }
+      for (const b of deb) {
+        const t = f * CRASH_FRAME_S * 1.6, px = 230 + Math.cos(b.a) * b.v * t * 3, py = 150 + Math.sin(b.a) * b.v * t * 3 + 40 * t * t;
+        if (b.fire) { x.fillStyle = BURST_COL[Math.min(4, 1 + Math.floor(f / 2))]; x.fillRect(Math.round(px), Math.round(py), 4, 4); }
+        else x.drawImage(spr.canvas, b.sx, Math.max(0, b.sy), b.sz, b.sz, Math.round(px), Math.round(py), b.sz, b.sz);
+      }
+      frames.push(c);
+    }
+    return frames;
+  }
+
+  // gate bookkeeping for the autopilot (ring buffer of recent gate centres)
+  // gate bookkeeping is done inside P._gate (escape-gap evidence fields included)
+  const _startOrig = P.start;
+  P.start = function (cfg) { this.gates = []; this._popText = ""; _startOrig.call(this, cfg); };
+  const _deployOrig = P.deploy;
+  P.deploy = function () { const ok = _deployOrig.call(this); if (ok) this._popText = "+" + this.bonus.toLocaleString("en-US") + " BONUS"; return ok; };
+
+  global.RocketBayFlight = {
+    FlightEngine, prepareStack, bonusFor, scoreFor,
+    CONST: { WORLD_H, MIN_VIEW_W, KM_PER_PX, DEPLOY_MIN_KM, BONUS_K, BONUS_EXP, COIN_PTS, GEM_COINS, LIGHT_THRUST, LIGHT_GRAVITY, LIGHT_TILT, LIGHT_FUEL, GRAVITY, THRUST, VY_MAX, SPEED0, SPEED_CAP, FUEL_DRAIN, FUEL_REFILL },
+  };
+})(typeof window !== "undefined" ? window : globalThis);

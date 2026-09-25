@@ -21,6 +21,12 @@
   const MAKEUP = 1.0;         // calibrated with ffmpeg ebur128 (see NOTES-audio-v1.md)
   const PRE = 0.21;           // bus trim into the compressor
 
+  // Countdown beep table (e = seconds from engine start = the sim clock the countdown text follows)
+  const BEEP_T = [0, 1, 2, 3, 4];                 // T-5, T-4, T-3, T-2 (ignition), T-1
+  const BEEP_F = [392, 415, 440, 466, 494];       // G4 -> B4, gentle rise
+  const BEEP_DUR = 0.14;
+  const BEEP_FINAL_T = 5, BEEP_FINAL_F = 587, BEEP_FINAL_DUR = 0.55; // zero / LIFTOFF: D5 long tone
+
   function rng(seed) {
     let s = seed >>> 0 || 1;
     return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
@@ -127,24 +133,26 @@
     const src = (buf, off) => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; srcs.push(s); s._off = off || 0; return s; };
     const at = (e) => t0 + e;
 
-    // ---- countdown beeps: accelerate + rise, end on one long tone (before ignition) ----
-    const beepT = [0.0, 0.62, 1.14, 1.56, 1.90, 2.16, 2.34];
-    const beepF = [740, 784, 880, 988, 1047, 1109, 1175];
-    const beepG = ctx.createGain(); beepG.gain.value = 0.16; beepG.connect(bus);
-    const beepLP = ctx.createBiquadFilter(); beepLP.type = "lowpass"; beepLP.frequency.value = 3800; beepLP.connect(beepG);
+    // ---- countdown beeps (flight-v1 retune, Ateeb): locked to the visible countdown ticks.
+    // liftoff.js shows T-5 at e=0, T-4 at 1, T-3 at 2, T-2 at 3 (ignition), T-1 at 4, LIFTOFF (zero) at 5.
+    // One short beep on every number change, the long final tone exactly on zero. Low + soft:
+    // triangle body + a little square, low-passed (no bright 2f partial any more).
+    const beepG = ctx.createGain(); beepG.gain.value = 0.2; beepG.connect(bus);
+    const beepLP = ctx.createBiquadFilter(); beepLP.type = "lowpass"; beepLP.frequency.value = 1800; beepLP.Q.value = 0.5; beepLP.connect(beepG);
     const beep = (e, f, dur, lvl) => {
       const o = ctx.createOscillator(); o.type = "triangle"; o.frequency.value = f;
-      const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = f * 2;
+      const o2 = ctx.createOscillator(); o2.type = "square"; o2.frequency.value = f;
       const g = ctx.createGain(); g.gain.value = 0;
-      const g2 = ctx.createGain(); g2.gain.value = 0.18;
+      const g2 = ctx.createGain(); g2.gain.value = 0.12;
       o.connect(g); o2.connect(g2); g2.connect(g); g.connect(beepLP);
-      g.gain.setValueAtTime(0, at(e)); g.gain.linearRampToValueAtTime(lvl || 1, at(e) + 0.005);
-      g.gain.setValueAtTime(lvl || 1, at(e) + dur - 0.03); g.gain.linearRampToValueAtTime(0, at(e) + dur);
+      const L = lvl || 1;
+      g.gain.setValueAtTime(0, at(e)); g.gain.linearRampToValueAtTime(L, at(e) + 0.006);
+      g.gain.setValueAtTime(L, at(e) + dur - 0.04); g.gain.linearRampToValueAtTime(0, at(e) + dur);
       o.start(at(e)); o2.start(at(e)); o.stop(at(e) + dur + 0.02); o2.stop(at(e) + dur + 0.02);
       srcs.push(o, o2);
     };
-    for (let i = 0; i < beepT.length; i++) beep(beepT[i], beepF[i], 0.085);
-    beep(2.46, 1319, 0.5, 0.55);
+    for (let i = 0; i < BEEP_T.length; i++) beep(BEEP_T[i], BEEP_F[i], BEEP_DUR);
+    beep(BEEP_FINAL_T, BEEP_FINAL_F, BEEP_FINAL_DUR, 1.25);
 
     // ---- ignition whump(s) ----
     const whump = (e, gain) => {
@@ -270,6 +278,93 @@
     };
   }
 
+  /* ---------- flight-v1: flight engine bed, deploy pop, crash boom (all synth, seeded noise) ---------- */
+  // Engine bed for the endless flight: continues the launch roar "thinned by altitude" (vacuum):
+  // a quiet low-passed hiss + sub that swells while thrust is held. Returns a controller.
+  function flightVoice(ctx, input, t0) {
+    const B = buffers(ctx);
+    const bus = ctx.createGain(); bus.gain.value = 0; bus.connect(input);
+    bus.gain.setValueAtTime(0, t0); bus.gain.linearRampToValueAtTime(1, t0 + 0.6);
+    const n = ctx.createBufferSource(); n.buffer = B.white; n.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 520; lp.Q.value = 0.4;
+    const shelf = ctx.createBiquadFilter(); shelf.type = "lowshelf"; shelf.frequency.value = 200; shelf.gain.value = 6;
+    const g = ctx.createGain(); g.gain.value = 0.05;
+    n.connect(shelf); shelf.connect(lp); lp.connect(g); g.connect(bus);
+    const b = ctx.createBufferSource(); b.buffer = B.brown; b.loop = true;
+    const blp = ctx.createBiquadFilter(); blp.type = "lowpass"; blp.frequency.value = 160;
+    const hd = ctx.createWaveShaper(); hd.curve = shaperCurve(2.0);
+    const bg = ctx.createGain(); bg.gain.value = 0.06;
+    b.connect(blp); blp.connect(hd); hd.connect(bg); bg.connect(bus);
+    n.start(t0, 1.3); b.start(t0, 0.4);
+    return {
+      bus,
+      setThrust(on, t) { // smooth 60-90 ms swell / decay
+        t = Math.max(t, ctx.currentTime);
+        g.gain.setTargetAtTime(on ? 0.16 : 0.05, t, on ? 0.03 : 0.07);
+        bg.gain.setTargetAtTime(on ? 0.2 : 0.06, t, on ? 0.03 : 0.09);
+        lp.frequency.setTargetAtTime(on ? 900 : 520, t, 0.05);
+      },
+      stop(t, fade) {
+        t = Math.max(t || ctx.currentTime, ctx.currentTime); fade = fade == null ? 0.3 : fade;
+        try { bus.gain.cancelScheduledValues(t); bus.gain.setValueAtTime(bus.gain.value, t); bus.gain.linearRampToValueAtTime(0, t + fade); } catch (_) {}
+        try { n.stop(t + fade + 0.05); b.stop(t + fade + 0.05); } catch (_) {}
+      },
+    };
+  }
+  // Deploy pop: pneumatic separation "thup" + short bright puff + a soft two-note rise (bonus cue)
+  function deployPop(ctx, input, t) {
+    const B = buffers(ctx);
+    const o = ctx.createOscillator(); o.type = "sine";
+    o.frequency.setValueAtTime(420, t); o.frequency.exponentialRampToValueAtTime(140, t + 0.12);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0, t); og.gain.linearRampToValueAtTime(0.55, t + 0.004); og.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(og); og.connect(input); o.start(t); o.stop(t + 0.25);
+    const n = ctx.createBufferSource(); n.buffer = B.white;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.setValueAtTime(2200, t); bp.frequency.exponentialRampToValueAtTime(700, t + 0.18); bp.Q.value = 0.9;
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(0.5, t + 0.003); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    n.connect(bp); bp.connect(ng); ng.connect(input); n.start(t, 0.7, 0.3);
+    [[523, 0.16], [784, 0.28]].forEach(([f, d]) => {
+      const c = ctx.createOscillator(); c.type = "triangle"; c.frequency.value = f;
+      const cg = ctx.createGain(); cg.gain.setValueAtTime(0, t + d); cg.gain.linearRampToValueAtTime(0.22, t + d + 0.01); cg.gain.exponentialRampToValueAtTime(0.001, t + d + 0.3);
+      c.connect(cg); cg.connect(input); c.start(t + d); c.stop(t + d + 0.35);
+    });
+  }
+  // Crash boom: sub thump + low-passed brown-noise blast that darkens, crackle tail
+  function crashBoom(ctx, input, t) {
+    const B = buffers(ctx);
+    const o = ctx.createOscillator(); o.type = "sine";
+    o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(28, t + 0.7);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0, t); og.gain.linearRampToValueAtTime(0.9, t + 0.01); og.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+    o.connect(og); og.connect(input); o.start(t); o.stop(t + 1.0);
+    const n = ctx.createBufferSource(); n.buffer = B.brown;
+    const pre = ctx.createGain(); pre.gain.value = 2.5;
+    const sh = ctx.createWaveShaper(); sh.curve = shaperCurve(2.6); sh.oversample = "2x";
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.setValueAtTime(2400, t); lp.frequency.exponentialRampToValueAtTime(140, t + 1.3);
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(0.75, t + 0.008); ng.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    n.connect(pre); pre.connect(sh); sh.connect(lp); lp.connect(ng); ng.connect(input); n.start(t, 1.9, 1.7);
+    const c = ctx.createBufferSource(); c.buffer = B.crackle;
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 900;
+    const cg = ctx.createGain(); cg.gain.setValueAtTime(0, t + 0.05); cg.gain.linearRampToValueAtTime(0.35, t + 0.1); cg.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+    c.connect(hp); hp.connect(cg); cg.connect(input); c.start(t + 0.05, 0.9, 1.1);
+  }
+  // Offline render of a whole run for recordings: launch at `launchAt` (video s), flight bed from
+  // `flightAt`, events [{t (video s), type: 'thrust'|'deploy'|'crash'|'end', on}] from the capture log.
+  function renderRunOffline(opts) {
+    const sr = opts.sampleRate || 48000, dur = opts.duration;
+    const OAC = global.OfflineAudioContext || global.webkitOfflineAudioContext;
+    const ctx = new OAC(2, Math.round(sr * dur), sr);
+    const chain = makeChain(ctx, ctx.destination);
+    if (opts.launchAt != null) scheduleLaunch(ctx, chain.input, opts.launchAt, { boosters: !!opts.boosters });
+    let fv = null;
+    if (opts.flightAt != null) fv = flightVoice(ctx, chain.input, opts.flightAt);
+    for (const ev of opts.events || []) {
+      if (ev.type === "thrust" && fv) fv.setThrust(!!ev.on, ev.t);
+      else if (ev.type === "deploy") deployPop(ctx, chain.input, ev.t);
+      else if (ev.type === "crash") { crashBoom(ctx, chain.input, ev.t); if (fv) fv.stop(ev.t, 0.25); }
+      else if (ev.type === "end" && fv) fv.stop(ev.t, 0.3);
+    }
+    return ctx.startRendering();
+  }
+
   // Offline render of one launch (evidence / loudness): returns an AudioBuffer.
   // preRoll = seconds of silence before sim e=0 (e.g. GO tap -> engine start).
   function renderOffline(opts) {
@@ -282,5 +377,6 @@
     return ctx.startRendering();
   }
 
-  global.RocketBayAudio = { makeChain, scheduleLaunch, renderOffline, altAt, CEIL };
+  global.RocketBayAudio = { makeChain, scheduleLaunch, renderOffline, renderRunOffline, flightVoice, deployPop, crashBoom, altAt, CEIL,
+    BEEPS: { t: BEEP_T, f: BEEP_F, dur: BEEP_DUR, finalT: BEEP_FINAL_T, finalF: BEEP_FINAL_F, finalDur: BEEP_FINAL_DUR } };
 })(typeof window !== "undefined" ? window : globalThis);

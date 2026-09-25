@@ -194,11 +194,6 @@
     }
     .op.done { background: rgba(40,180,90,.35); border-color: rgba(80,220,120,.5); }
     .op.run { background: rgba(255,140,0,.35); border-color: var(--accent); }
-    #missionBox, #outcomeBox { display: none; flex-direction: column; gap: 8px; align-items: center; }
-    #missionBox.on, #outcomeBox.on { display: flex; }
-    #outcomeBox .score {
-      font-size: 18px; font-weight: 900; letter-spacing: .06em; color: #ffe08a;
-    }
     #meta { text-align: center; font-size: 10px; opacity: .8; letter-spacing: .03em; }
     #soundBtn { min-width: 84px; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; }
     #soundBtn .spk { width: 15px; height: 15px; flex: 0 0 auto; }
@@ -246,6 +241,63 @@
     #fbCancel { background: rgba(255,255,255,.15); color: #fff; }
     #fbStatus { font-size: 12px; min-height: 16px; }
     #fbStatus.ok { color: #9dfcc0; } #fbStatus.err { color: #ffb4a6; }
+    /* ---- FLIGHT MODE v1 ---- */
+    #todRow { display: none !important; }            /* TOD is automatic (local clock); ?tod= override for testing */
+    #flightCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 30; display: none; touch-action: none; background: #050a18; }
+    .flBtn { position: fixed; z-index: 35; display: none; align-items: center; justify-content: center; gap: 8px; padding: 0;
+      background: rgba(10,28,58,.8); border: 2px solid #64D2FF; box-shadow: inset 0 0 0 1px #3C6385; border-radius: 6px;
+      color: #E1F2FF; font: 700 16px/1 "DejaVu Sans", Verdana, system-ui, sans-serif; letter-spacing: .02em; touch-action: none; }
+    .flBtn.on { display: flex; }
+    #flDeploy img { image-rendering: pixelated; height: 60%; }
+    #flDeploy.ready { background: #123E6E; animation: rbBlink .5s steps(1) infinite; }
+    #flDeploy.disabled { border-color: #5b6470; background: rgba(40,44,52,.75); color: #8a929c; box-shadow: none; }
+    #flDeploy.disabled img, #flDeploy.used img { filter: grayscale(1) brightness(.8); }
+    #flDeploy.used { opacity: .7; } #flDeploy .ck { color: #5CFF7A; } #flDeploy .lk { font-size: .8em; }
+    @keyframes rbBlink { 0% { outline: 1px solid #A0EBFF; outline-offset: 1px; } 50% { outline: 0 solid transparent; } }
+    #flPause { font-size: 18px; }
+    #pauseBox, #nameModal { position: fixed; inset: 0; z-index: 55; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
+    #pauseBox.on, #nameModal.on { display: flex; }
+    .panel { background: rgba(10,28,58,.92); border: 2px solid #64D2FF; box-shadow: inset 0 0 0 1px #3C6385; border-radius: 10px; color: #E1F2FF;
+      font: 700 14px/1.3 "DejaVu Sans", Verdana, system-ui, sans-serif; padding: 12px 14px; }
+    .panel h3 { margin: 0 0 6px; font-size: 20px; text-align: center; letter-spacing: .02em; }
+    .panel button { border: 2px solid #64D2FF; background: rgba(10,28,58,.9); border-radius: 8px; color: #E1F2FF; font: 700 15px/1 "DejaVu Sans", Verdana, sans-serif; padding: 11px 14px; }
+    .panel button.lbPrimary { background: #123E6E; }
+    #nameCard { width: min(92vw, 360px); display: flex; flex-direction: column; gap: 10px; }
+    #nameCard input { width: 100%; background: #060a16; color: #fff; border: 1px solid #3C6385; border-radius: 8px; padding: 10px; font: 700 16px "DejaVu Sans", Verdana, sans-serif; }
+    #result { position: fixed; inset: 0; z-index: 50; display: none; overflow: auto; -webkit-overflow-scrolling: touch;
+      padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom)); gap: 10px;
+      flex-direction: column; align-items: center; justify-content: center; }
+    #result.on { display: flex; }
+    #resCard, #lbCard { width: min(94vw, 420px); }
+    #resTag { text-align: center; font-size: 40px; letter-spacing: .08em; font-weight: 900; margin: 2px 0 6px; text-shadow: 0 2px 0 #000; }
+    #resTag.ok { color: #4EE06A; } #resTag.bad { color: #FF4D4D; }
+    .rrow { display: flex; justify-content: space-between; gap: 10px; padding: 3px 2px; font-size: 14px; }
+    .rrow span { color: #9fc3e6; } .rrow.score { font-size: 19px; border-top: 1px solid #3C6385; margin-top: 3px; padding-top: 6px; }
+    .rrow.score b { color: #ffe36a; } .rrow .pbnew { color: #5CFF7A; }
+    #resPilot { margin-top: 6px; font-size: 12px; color: #9fc3e6; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+    #resPilot b { color: #E1F2FF; } #resPilot button { padding: 5px 9px; font-size: 11px; }
+    .lbrow { display: grid; grid-template-columns: 34px 1fr auto 86px; gap: 6px; align-items: center; padding: 5px 8px; font-size: 14px; border-radius: 4px; }
+    .lbrow:nth-child(odd) { background: rgba(20,44,80,.55); }
+    .lbrow.head { font-size: 11px; color: #9fc3e6; background: none; }
+    .lbrow .rk { color: #E1F2FF; } .lbrow .rk.top { color: #FFD84A; }
+    .lbrow .sc { text-align: right; font-variant-numeric: tabular-nums; }
+    .lbrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lbrow .tg { font-size: 10px; text-align: center; border-radius: 3px; padding: 3px 0; letter-spacing: .04em; }
+    .tg.ok { background: rgba(40,170,70,.35); color: #7CFF9A; border: 1px solid #4EE06A; } .tg.bad { background: rgba(190,40,40,.3); color: #FF8A8A; border: 1px solid #FF4D4D; }
+    .lbrow.you { background: #123E6E !important; outline: 2px solid #A0EBFF; }
+    .lbrow.pinned { margin-top: 6px; }
+    .lbrow.sep { display: block; text-align: center; color: #6d8fb4; padding: 0; font-size: 12px; background: none !important; }
+    #lbNote { min-height: 16px; font-size: 11px; color: #9fc3e6; text-align: center; margin: 6px 0 2px; }
+    #lbNote.err { color: #ffb4a6; }
+    #lbCard .btns { display: flex; gap: 10px; justify-content: space-between; margin-top: 8px; }
+    #lbCard .btns button { flex: 1; }
+    @media (orientation: landscape) and (max-height: 560px) {
+      #result { flex-direction: row; align-items: center; }
+      #resCard { width: min(44vw, 360px); } #lbCard { width: min(52vw, 440px); }
+      #resTag { font-size: 32px; } .lbrow { padding: 3px 8px; font-size: 13px; } .rrow { font-size: 13px; padding: 2px; }
+      .panel h3 { font-size: 17px; margin-bottom: 3px; } #lbCard .btns button { padding: 8px 12px; }
+    }
+    body.inFlight #buildLabel { top: auto; bottom: calc(4px + env(safe-area-inset-bottom)); }
   </style>
 </head>
 <body>
@@ -302,30 +354,47 @@
 
     <div id="ops" class="row" aria-label="Pad ops"></div>
 
-    <div id="missionBox">
-      <div class="row">
-        <button type="button" class="cyan" id="deployBtn">Deploy payload</button>
-        <button type="button" class="cyan" id="exploreBtn">Explore the universe</button>
-      </div>
-    </div>
+  </div>
 
-    <div id="outcomeBox">
-      <div class="score" id="outcomeScore"></div>
-      <div id="outcomeText" style="font-size:12px;opacity:.9;text-align:center"></div>
-      <button type="button" class="primary" id="restartBtn">FLY AGAIN</button>
+  <canvas id="flightCanvas" aria-label="Flight: hold anywhere to thrust"></canvas>
+  <button type="button" class="flBtn" id="flDeploy" aria-label="Deploy payload"><img src="flight/hud/deploy-icon.png" alt="" /><span class="t">DEPLOY</span></button>
+  <button type="button" class="flBtn" id="flPause" aria-label="Pause">&#10074;&#10074;</button>
+  <div id="pauseBox"><div class="panel" style="text-align:center;display:flex;flex-direction:column;gap:10px;min-width:220px"><h3>Paused</h3><button type="button" id="flResume" class="lbPrimary">Resume</button></div></div>
+  <div id="nameModal" role="dialog" aria-modal="true"><div class="panel" id="nameCard"><h3>Pilot name</h3>
+    <div style="font-size:12px;color:#9fc3e6">Shown on the global leaderboard (1&ndash;16 characters).</div>
+    <input id="nameInput" maxlength="16" autocomplete="nickname" value="Pilot" />
+    <button type="button" id="nameOk" class="lbPrimary">OK</button></div></div>
+  <div id="result" aria-live="polite">
+    <div class="panel" id="resCard">
+      <div id="resTag">FAILED</div>
+      <div class="rrow"><span>Distance</span><b id="resDist"></b></div>
+      <div class="rrow"><span>Bonus</span><b id="resBonus"></b></div>
+      <div class="rrow"><span>Coins</span><b id="resCoins"></b></div>
+      <div class="rrow"><span>Coin points</span><b id="resCoinPts"></b></div>
+      <div class="rrow score"><span>Score</span><b id="resScore"></b></div>
+      <div class="rrow"><span>Personal best</span><b id="resPB"></b></div>
+      <div id="resPilot"><span>Pilot: <b id="resName">Pilot</b></span><button type="button" id="resEdit">Edit name</button></div>
+    </div>
+    <div class="panel" id="lbCard">
+      <h3>Leaderboard</h3>
+      <div class="lbrow head"><span>#</span><span>Pilot</span><span class="sc">Score</span><span style="text-align:center">Result</span></div>
+      <div id="lbRows"></div>
+      <div id="lbNote"></div>
+      <div class="btns"><button type="button" id="flyAgain" class="lbPrimary">Fly again</button><button type="button" id="backPad">Back to pad</button></div>
     </div>
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
   <script src="modular.js?v=audio1"></script>
-  <script src="audio.js?v=audio1"></script>
-  <script src="liftoff.js?v=audio1"></script>
+  <script src="audio.js?v=flight1"></script>
+  <script src="liftoff.js?v=flight1"></script>
+  <script src="flight.js?v=flight1"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
     const KIT_VER = "audio1";
     const PAD_VER = "pad5";
-    const APP_VER = "audio1";
+    const APP_VER = "flight1";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -357,7 +426,6 @@
       build: EMPTY_BUILD(),
       history: [],
       swapSlot: null,
-      missionChoice: null,
     };
     let KIT = null;
 
@@ -434,26 +502,22 @@
       } finally { fbSend.disabled = false; }
     });
     const launchBtn = $("launchBtn"), assembleUI = $("assembleUI"), opsEl = $("ops"), chromeEl = $("chrome");
-    const missionBox = $("missionBox"), outcomeBox = $("outcomeBox"), stackHud = $("stackHud"), phaseHud = $("phaseHud");
+    const stackHud = $("stackHud"), phaseHud = $("phaseHud");
 
+    // Scene follows the phone's local clock (Ateeb, flight-v1): 05:00-07:59 sunrise (02), 08:00-16:59 day (05),
+    // 17:00-19:59 sunset (03), 20:00-04:59 night (04). Hidden ?tod=02|03|04|05 override for testing/capture.
     function todFromHour(h) {
-      if (h >= 6 && h <= 8) return 0;
-      if (h >= 17 && h <= 18) return 1;
-      if (h >= 19 || h <= 4) return 2;
-      if (h === 5) return 0;
-      return 3;
+      if (h >= 5 && h <= 7) return 0;
+      if (h >= 8 && h <= 16) return 3;
+      if (h >= 17 && h <= 19) return 1;
+      return 2;
     }
     state.todIndex = todFromHour(new Date().getHours());
     const QS = new URLSearchParams(location.search);
     if (QS.get("tod")) { const i = TODS.findIndex((t) => t.id === QS.get("tod")); if (i >= 0) state.todIndex = i; }
     plate.addEventListener("load", () => { applyPlateMap(); });
 
-    TODS.forEach((t, i) => {
-      const b = document.createElement("button");
-      b.type = "button"; b.textContent = t.label;
-      b.addEventListener("click", () => { if (state.phase !== "assemble") return; state.todIndex = i; rebuildRocket(null); render(); });
-      todRow.appendChild(b);
-    });
+    // (TOD selector removed in flight-v1: scene is automatic)
     SLOTS.forEach((s) => {
       const b = document.createElement("button");
       b.type = "button"; b.dataset.slot = s.key; b.textContent = s.label;
@@ -880,14 +944,13 @@
       chromeEl.classList.toggle("building", p === "assemble");
       opsEl.classList.toggle("on", p === "grounded");
       chromeEl.classList.toggle("liftoffHidden", p === "liftoff");
-      const fb = !!state.flightBackdrop && (p === "mission" || p === "outcome");
+      const fb = !!state.flightBackdrop && (p === "flight" || p === "result");
       todRow.style.display = (p === "liftoff" || p === "grounded" || fb) ? "none" : "";
       meta.style.display = (p === "liftoff" || p === "assemble") ? "none" : "";
       $("hud").style.display = (p === "liftoff" || p === "grounded" || p === "assemble") ? "none" : "";
-      missionBox.classList.toggle("on", p === "mission");
-      $("fbBtn").classList.toggle("on", p === "assemble" || p === "mission" || p === "outcome");
+      $("fbBtn").classList.toggle("on", p === "assemble" || p === "result");
       if (p !== "assemble") hideHint();
-      outcomeBox.classList.toggle("on", p === "outcome");
+      document.body.classList.toggle("inFlight", p === "flight" || p === "result");
       phaseHud.textContent = p.toUpperCase();
       stackHud.textContent = KIT ? (idsOf(state.build).map(lbl).join(" + ") || "\u2014") : "";
       launchBtn.disabled = !(KIT && isComplete(state.build) && !validate(state.build, 0));
@@ -963,10 +1026,9 @@
         getStackEl: () => stackEl,
         getPlateEl: () => plate,
         onComplete: () => {
-          state.phase = "mission";
           state.flightBackdrop = true;
           clearStackOverlay();
-          render();
+          startFlight();
         },
         onPerfSample: (samples) => { window.__liftoffPerf = samples; },
       });
@@ -1003,6 +1065,7 @@
       if (rocket) rocket.anim = null;
       state.phase = "grounded";
       render();
+      flightPreload = getFlight().preload(TODS[state.todIndex].id).catch(() => {});
       renderOps(0); await sleep(280);
       renderOps(1); await sleep(280);
       renderOps(2); await sleep(280);
@@ -1014,36 +1077,206 @@
       setChrome();
       paintStack();
       const eng = getLiftoff();
-      if (!eng) { state.phase = "mission"; render(); return; }
+      if (!eng) { startFlight(); return; }
       eng.audioMuted = !soundOn;
       eng.start();
     };
 
-    function finishMission(choice) {
-      state.missionChoice = choice;
-      state.phase = "outcome";
-      const b = state.build;
-      const base = 62 + Math.floor(Math.random() * 18);
-      const score = Math.min(99, base + (b.sides ? 8 : 0) + (choice === "explore" ? 5 : 3));
-      $("outcomeScore").textContent = `ROCKET SCORE ${score}`;
-      $("outcomeText").textContent = choice === "deploy"
-        ? `${b.payload ? lbl(b.payload) : lbl(b.upper)} deployed from ${lbl(b.s1)}. Clean separation.`
-        : `${lbl(b.s1)} / ${lbl(b.upper)} coasting \u2014 explore path locked in.`;
-      render();
-    }
-    $("deployBtn").onclick = () => finishMission("deploy");
-    $("exploreBtn").onclick = () => finishMission("explore");
-    $("restartBtn").onclick = () => {
+    function backToPad() {
+      stopFlight();
       if (liftoffEngine) liftoffEngine.reset();
       state.flightBackdrop = false;
       state.phase = "assemble";
-      state.missionChoice = null;
       worldEl.style.transform = "";
       skyExt.style.opacity = "0";
       countdownHud.style.display = "none";
       fxCanvas.style.display = "none";
       rebuildRocket(null);
       render();
+    }
+
+    /* ================= FLIGHT MODE v1 + global leaderboard ================= */
+    const FL = window.RocketBayFlight;
+    const flCanvas = $("flightCanvas"), flDeploy = $("flDeploy"), flPause = $("flPause"), resultEl = $("result");
+    const LB_COOLDOWN_MS = 21000;        // rules: one leaderboard write per 20 s per browser (throttleLb/{cid})
+    const LB_TIMEOUT_MS = 9000;          // offline / blocked -> local result only
+    let flight = null, flightPreload = null, deployTimer = null, lastRun = null, runSeq = 0;
+    function getFlight() {
+      if (flight) return flight;
+      flight = new FL.FlightEngine({
+        canvas: flCanvas, base: "flight/", captureMode: QS.has("capture"),
+        padPlate: (tod) => padCfg(tod).emptyPad + "?v=" + PAD_VER,
+        getAudio: () => liftoffEngine && liftoffEngine.audio,
+        onLayout: layoutFlightUi,
+        onCrash: () => updateDeployBtn(),
+        onGameOver: (r) => onGameOver(r),
+      });
+      window.__flight = flight;
+      return flight;
+    }
+    function layoutFlightUi(L) {
+      const hs = L.hs, dw = Math.round(190 * hs), dh = Math.round(60 * hs), pw = Math.round(46 * hs);
+      Object.assign(flDeploy.style, { width: dw + "px", height: dh + "px", fontSize: Math.round(22 * hs) + "px" });
+      Object.assign(flPause.style, { width: pw + "px", height: pw + "px" });
+      const m = Math.round(14 * hs);
+      if (L.letterbox) { // portrait: controls live in the letterbox, outside the play band
+        flDeploy.style.right = m + "px"; flDeploy.style.bottom = ""; flDeploy.style.top = Math.round(L.oy + L.bandH + 14) + "px";
+        flPause.style.right = m + "px"; flPause.style.top = Math.max(8, Math.round(L.oy - pw - 12)) + "px";
+      } else {
+        flDeploy.style.top = ""; flDeploy.style.right = "calc(" + m + "px + env(safe-area-inset-right))"; flDeploy.style.bottom = "calc(" + m + "px + env(safe-area-inset-bottom))";
+        flPause.style.right = "calc(" + m + "px + env(safe-area-inset-right))"; flPause.style.top = m + "px";
+      }
+    }
+    function buildBotCfg() {
+      if (!QS.has("bot")) return null;
+      return { deployAtKm: +QS.get("deployKm") || 0, crashAtKm: +QS.get("crashKm") || 0 };
+    }
+    async function startFlight(retry) {
+      state.phase = "flight";
+      setChrome();
+      history.replaceState(null, "", `${location.search}#${TODS[state.todIndex].id}-flight`);
+      resultEl.classList.remove("on");
+      const f = getFlight();
+      if (!flightPreload) flightPreload = f.preload(TODS[state.todIndex].id).catch(() => {});
+      await flightPreload;
+      const sprites = FL.prepareStack(KIT, MB, state.build, "flight/");
+      const seed = QS.has("capture") || QS.has("seed") ? ((+QS.get("seed") || 7) + (retry ? runSeq : 0)) : ((Date.now() ^ (Math.random() * 1e9)) >>> 0);
+      runSeq++;
+      if (liftoffEngine && liftoffEngine.audio && soundOn && !QS.has("capture")) { try { liftoffEngine.audio.ctx.resume(); } catch (_) {} }
+      f.start({ sprites, tod: TODS[state.todIndex].id, seed, bot: window.__flightBot || buildBotCfg() });
+      window.__flightInfo = { mode: sprites.mode, packKey: sprites.packKey, chain: f.chain.map((n) => [+n.x.toFixed(1), +n.y.toFixed(1), +n.r.toFixed(1)]), seed };
+      flDeploy.classList.add("on"); flPause.classList.add("on");
+      updateDeployBtn();
+      clearInterval(deployTimer); deployTimer = setInterval(updateDeployBtn, 100);
+    }
+    function stopFlight() {
+      clearInterval(deployTimer);
+      if (flight) flight.stop();
+      flDeploy.classList.remove("on"); flPause.classList.remove("on");
+      $("pauseBox").classList.remove("on"); resultEl.classList.remove("on");
+    }
+    function updateDeployBtn() {
+      if (!flight) return;
+      const st = flight.deployed ? "used" : flight.canDeploy() ? "ready" : "disabled";
+      if (flDeploy.dataset.st === st) return;
+      flDeploy.dataset.st = st;
+      flDeploy.className = "flBtn on " + st;
+      flDeploy.querySelector(".t").innerHTML = st === "used" ? 'DEPLOYED<span class="ck">\u2713</span>' : st === "ready" ? "DEPLOY" : 'DEPLOY <span class="lk">\u{1F512}\uFE0E</span>';
+      flDeploy.setAttribute("aria-label", st === "used" ? "Payload deployed" : st === "ready" ? "Deploy payload" : "Deploy payload (available from 300 km)");
+    }
+    // hold anywhere = thrust (multi-touch safe: counts active pointers on the canvas)
+    const holdIds = new Set();
+    const holdSync = () => { if (flight) flight.setHold(holdIds.size > 0); };
+    flCanvas.addEventListener("pointerdown", (e) => { e.preventDefault(); holdIds.add(e.pointerId); try { flCanvas.setPointerCapture(e.pointerId); } catch (_) {} holdSync(); });
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach((ev) => flCanvas.addEventListener(ev, (e) => { holdIds.delete(e.pointerId); holdSync(); }));
+    window.addEventListener("keydown", (e) => { if (state.phase === "flight" && (e.code === "Space" || e.code === "ArrowUp")) { e.preventDefault(); if (flight) flight.setHold(true); } if (state.phase === "flight" && e.code === "KeyD" && flight) { flight.deploy(); updateDeployBtn(); } });
+    window.addEventListener("keyup", (e) => { if (e.code === "Space" || e.code === "ArrowUp") { if (flight) flight.setHold(holdIds.size > 0); } });
+    flDeploy.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); if (flight && flight.deploy()) { try { navigator.vibrate && navigator.vibrate(30); } catch (_) {} } updateDeployBtn(); });
+    const setPause = (p) => { if (!flight || !flight.running) return; flight.setPaused(p); $("pauseBox").classList.toggle("on", !!flight.paused); if (p) { holdIds.clear(); flight.setHold(false); } };
+    flPause.addEventListener("click", () => setPause(!(flight && flight.paused)));
+    $("flResume").addEventListener("click", () => setPause(false));
+    document.addEventListener("visibilitychange", () => { if (document.hidden && state.phase === "flight" && flight && !flight.crashed) setPause(true); });
+
+    /* ---- result screen ---- */
+    const fmt = (n) => Number(n).toLocaleString("en-US");
+    function pilotName() { return (LS.get("rb_pilot") || "").trim(); }
+    function askName() {
+      return new Promise((res) => {
+        const m = $("nameModal"), inp = $("nameInput");
+        inp.value = pilotName() || "Pilot";
+        m.classList.add("on"); setTimeout(() => { inp.focus(); inp.select(); }, 60);
+        const done = () => { const v = inp.value.trim().slice(0, 16) || "Pilot"; LS.set("rb_pilot", v); m.classList.remove("on"); $("nameOk").onclick = null; inp.onkeydown = null; res(v); };
+        $("nameOk").onclick = done; inp.onkeydown = (e) => { if (e.key === "Enter") done(); };
+      });
+    }
+    $("resEdit").addEventListener("click", async () => { const v = await askName(); $("resName").textContent = v; $("lbNote").textContent = "Name saved - used for your next runs."; $("lbNote").className = ""; });
+    $("flyAgain").addEventListener("click", () => { resultEl.classList.remove("on"); startFlight(true); });
+    $("backPad").addEventListener("click", () => backToPad());
+
+    async function onGameOver(r) {
+      holdIds.clear();
+      const b = state.build;
+      const run = Object.assign({}, r, { stack: (idsOf(b).join(",") + (b.sides ? "+sides" : "")).slice(0, 120), tod: String(TODS[state.todIndex].id), build: APP_VER });
+      lastRun = run; window.__lastRun = run;
+      const pb0 = +(LS.get("rb_pb") || 0), isPB = run.score > pb0;
+      if (isPB) LS.set("rb_pb", String(run.score));
+      flDeploy.classList.remove("on"); flPause.classList.remove("on"); clearInterval(deployTimer);
+      state.phase = "result"; setChrome();
+      history.replaceState(null, "", `${location.search}#${run.tod}-result`);
+      // result card
+      const tag = $("resTag"); tag.textContent = run.result; tag.className = run.result === "SUCCESS" ? "ok" : "bad";
+      $("resDist").textContent = fmt(run.distanceKm) + " km";
+      $("resBonus").textContent = run.deployed ? `+${fmt(run.bonus)} (deployed at ${fmt(run.deployKm)} km)` : "0 (no deploy)";
+      $("resCoins").textContent = fmt(run.coins);
+      $("resCoinPts").textContent = `+${fmt(run.coinPts)} (${fmt(run.coins)} \u00d7 ${FL.CONST.COIN_PTS})`;
+      $("resScore").textContent = fmt(run.score);
+      $("resPB").innerHTML = isPB ? `${fmt(run.score)} <span class="pbnew">NEW!</span>` : fmt(Math.max(pb0, run.score));
+      $("lbRows").innerHTML = ""; $("lbNote").textContent = ""; $("lbNote").className = "";
+      if (!pilotName() && !QS.has("autoname")) await askName();
+      if (!pilotName()) LS.set("rb_pilot", "Pilot");
+      $("resName").textContent = pilotName();
+      resultEl.classList.add("on");
+      const my = ++runSeq;
+      run.name = pilotName();
+      let myId = null;
+      try {
+        $("lbNote").textContent = "Posting your run\u2026";
+        myId = await withTimeout(postRun(run, (s) => { if (my === runSeq) $("lbNote").textContent = s; }), LB_TIMEOUT_MS + LB_COOLDOWN_MS);
+        run.docId = myId;
+      } catch (e) {
+        console.warn("[leaderboard] post failed", e);
+        if (my !== runSeq) return;
+        $("lbNote").textContent = "Leaderboard offline - your result is saved on this device."; $("lbNote").className = "err";
+      }
+      try { await withTimeout(renderBoard(run, myId), LB_TIMEOUT_MS); if (myId && my === runSeq) { $("lbNote").textContent = ""; } }
+      catch (e) { console.warn("[leaderboard] read failed", e); if (my === runSeq) { $("lbNote").textContent = "Leaderboard offline - your result is saved on this device."; $("lbNote").className = "err"; } }
+    }
+    function withTimeout(p, ms) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]); }
+    async function postRun(run, status) {
+      const last = +(LS.get("rb_lb_last") || 0), wait = LB_COOLDOWN_MS - (Date.now() - last);
+      if (wait > 0) { status(`Posting in ${Math.ceil(wait / 1000)} s (one run per 20 s)\u2026`); await sleep(wait); status("Posting your run\u2026"); }
+      const M = await fbMod();
+      const { db, fs } = await M.getDb();
+      const cid = M.clientId();
+      const data = { name: run.name, score: run.score, distanceKm: run.distanceKm, deployed: run.deployed, deployKm: run.deployKm, bonus: run.bonus,
+        coins: run.coins, result: run.result, stack: run.stack, tod: run.tod, build: run.build, cid, createdAt: fs.serverTimestamp() };
+      const batch = fs.writeBatch(db);
+      M.stampThrottle(fs, db, batch, cid, "throttleLb");
+      const ref = fs.doc(fs.collection(db, "leaderboard"));
+      batch.set(ref, data);
+      await withTimeout(batch.commit(), LB_TIMEOUT_MS);
+      LS.set("rb_lb_last", String(Date.now()));
+      return ref.id;
+    }
+    async function renderBoard(run, myId) {
+      const M = await fbMod();
+      const { db, fs } = await M.getDb();
+      const col = fs.collection(db, "leaderboard");
+      const snap = await fs.getDocs(fs.query(col, fs.orderBy("score", "desc"), fs.limit(10)));
+      const rows = []; let inTop = false;
+      snap.docs.forEach((d, i) => { const v = d.data(); const you = !!myId && d.id === myId; if (you) inTop = true; rows.push(rowHtml(i + 1, v.name, v.score, v.result, you)); });
+      if (myId && !inTop) {
+        let rank = null;
+        try { const c = await fs.getCountFromServer(fs.query(col, fs.where("score", ">", run.score), fs.limit(50))); const n = c.data().count; rank = n >= 50 ? "50+" : n + 1; } catch (e) { console.warn("[leaderboard] rank", e); }
+        rows.push('<div class="lbrow sep">\u22ee</div>');
+        rows.push(rowHtml(rank == null ? "\u2013" : rank, run.name, run.score, run.result, true, true));
+      }
+      $("lbRows").innerHTML = rows.join("") || '<div class="lbrow sep">No runs yet</div>';
+    }
+    function esc(t) { return String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+    function rowHtml(rank, name, score, result, you, pinned) {
+      const ok = result === "SUCCESS";
+      return `<div class="lbrow${you ? " you" : ""}${pinned ? " pinned" : ""}"><span class="rk${typeof rank === "number" && rank <= 3 ? " top" : ""}">${esc(rank)}</span>` +
+        `<span class="nm">${you ? "YOU \u00b7 " : ""}${esc(name)}</span><span class="sc">${fmt(score)}</span><span class="tg ${ok ? "ok" : "bad"}">${ok ? "SUCCESS" : "FAILED"}</span></div>`;
+    }
+    // capture/evidence API (deterministic): step the flight with a fixed dt
+    window.__flightCapture = {
+      step: (dt) => { if (flight) flight.captureStep(dt || 1 / 60); },
+      running: () => !!(flight && flight.running && !flight.gameOverFired),
+      state: () => flight ? { phase: flight.phase, t: flight.t, km: flight.km(), fuel: flight.fuel, coins: flight.coins, deployed: flight.deployed, deployKm: flight.deployKm, bonus: flight.bonus, crashed: flight.crashed, gameOver: flight.gameOverFired, result: flight.result, py: flight.py, speed: flight.speed } : null,
+      events: () => flight ? flight.events.slice() : [],
+      setBot: (b) => { window.__flightBot = b; if (flight) flight.bot = b; },
+      fps: () => flight ? flight.fps.slice() : [],
     };
 
     window.addEventListener("resize", () => { applyPlateMap(); if (state.phase !== "liftoff") { applyAssembleFrame(); paintStack(); } });

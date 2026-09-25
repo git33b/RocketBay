@@ -1,8 +1,15 @@
 rules_version = '2';
 // RocketBay Firestore rules.
-// Pattern for every public-write collection: CREATE-ONLY from clients (no reads/updates/deletes),
+// Pattern for every public-write collection: CREATE-ONLY from clients (no updates/deletes),
 // field whitelist, per-field type + size caps, server timestamp, and a per-browser throttle.
-// Owners read data in the Firebase console or with scripts/read-feedback.sh (admin credentials).
+// Owners read feedback in the Firebase console or with scripts/read-feedback.sh (admin credentials).
+//
+// KNOWN GAP (accepted for the friends trial, CoE: revisit before any public launch):
+// there is no Firebase Auth and no App Check, so `cid` is a self-declared browser id. The
+// throttle limits one browser, not one person; a scripted client can mint new cids. Rules make
+// every stored score internally consistent (score math, bonus curve, result tag, caps), but they
+// cannot prove the run was actually flown. Before a public launch: enable App Check (reCAPTCHA
+// Enterprise / DeviceCheck) and/or anonymous Auth + per-uid throttles, or move scoring server-side.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -13,24 +20,37 @@ service cloud.firestore {
       return incoming().keys().hasOnly(allowed) && incoming().keys().hasAll(required);
     }
     function isStr(v, minLen, maxLen) { return v is string && v.size() >= minLen && v.size() <= maxLen; }
+    function isInt(v, lo, hi) { return v is int && v >= lo && v <= hi; }
     // optional string field: absent, or a string within the cap
     function optStr(field, maxLen) { return !(field in incoming()) || isStr(incoming()[field], 0, maxLen); }
     function optInt(field) { return !(field in incoming()) || incoming()[field] is int; }
     // timestamp must be the server's request time (client sends serverTimestamp()) -> no backdating
     function serverStamped(field) { return incoming()[field] == request.time; }
-    // rate limit: the same batch must stamp throttle/{cid} (whose rules enforce the 30 s gap)
-    function throttled(cid) {
+    // rate limit: the same batch must stamp <coll>/{cid} (whose rules enforce the gap)
+    function throttledIn(coll, cid) {
       return isStr(cid, 8, 40)
-        && getAfter(/databases/$(database)/documents/throttle/$(cid)).data.last == request.time;
+        && getAfter(/databases/$(database)/documents/$(coll)/$(cid)).data.last == request.time;
+    }
+    function throttled(cid) { return throttledIn('throttle', cid); }
+    // throttle doc rules: one doc per browser id, >= `secs` between stamped writes
+    function throttleCreate(cid) { return cid.size() <= 40 && onlyFields(['last'], ['last']) && serverStamped('last'); }
+    function throttleUpdate(secs) {
+      return onlyFields(['last'], ['last']) && serverStamped('last')
+        && request.time > resource.data.last + duration.value(secs, 's');
     }
 
-    // ---------- throttle: one doc per browser id, >= 30 s between stamped writes ----------
+    // ---------- throttle (feedback): >= 30 s ----------
     match /throttle/{cid} {
       allow read, delete: if false;
-      allow create: if cid.size() <= 40
-        && onlyFields(['last'], ['last']) && serverStamped('last');
-      allow update: if onlyFields(['last'], ['last']) && serverStamped('last')
-        && request.time > resource.data.last + duration.value(30, 's');
+      allow create: if throttleCreate(cid);
+      allow update: if throttleUpdate(30);
+    }
+
+    // ---------- throttleLb (leaderboard): >= 20 s ----------
+    match /throttleLb/{cid} {
+      allow read, delete: if false;
+      allow create: if throttleCreate(cid);
+      allow update: if throttleUpdate(20);
     }
 
     // ---------- feedback (friend trial) ----------
@@ -51,18 +71,41 @@ service cloud.firestore {
         && throttled(incoming().cid);
     }
 
-    // ---------- leaderboard (NOT enabled yet; template for the next ticket) ----------
-    // match /leaderboard/{id} {
-    //   allow read: if true;                      // public board (or restrict to a summary doc)
-    //   allow update, delete: if false;
-    //   allow create: if onlyFields(['name', 'score', 'build', 'stack', 'tod', 'cid', 'createdAt'],
-    //                               ['name', 'score', 'build', 'cid', 'createdAt'])
-    //     && isStr(incoming().name, 1, 20)
-    //     && incoming().score is int && incoming().score >= 0 && incoming().score <= 100
-    //     && isStr(incoming().build, 1, 32) && optStr('stack', 200) && optStr('tod', 8)
-    //     && serverStamped('createdAt')
-    //     && throttled(incoming().cid);
-    // }
+    // ---------- leaderboard (flight-v1): public read, create-only, score math verified ----------
+    // score = distanceKm + bonus + coins * 5  (COIN_PTS = 5 in web/flight.js)
+    // bonus = round(50 * (deployKm / 100)^1.5) when deployed (BONUS_K / BONUS_EXP), else 0
+    function lbShapeOk(d) {
+      return onlyFields(
+            ['name', 'score', 'distanceKm', 'deployed', 'deployKm', 'bonus', 'coins', 'result', 'stack', 'tod', 'build', 'cid', 'createdAt'],
+            ['name', 'score', 'distanceKm', 'deployed', 'deployKm', 'bonus', 'coins', 'result', 'stack', 'tod', 'build', 'cid', 'createdAt'])
+        && isStr(d.name, 1, 16) && d.name.trim() == d.name
+        && isInt(d.score, 0, 10000000)
+        && isInt(d.distanceKm, 0, 10000000)
+        && d.deployed is bool
+        && isInt(d.deployKm, 0, 10000000)
+        && isInt(d.bonus, 0, 10000000)
+        && isInt(d.coins, 0, 100000)
+        && d.result in ['SUCCESS', 'FAILED']
+        && isStr(d.stack, 0, 120)
+        && d.tod in ['02', '03', '04', '05']
+        && isStr(d.build, 1, 32);
+    }
+    function lbMathOk(d) {
+      return d.result == (d.deployed ? 'SUCCESS' : 'FAILED')
+        && (d.deployed
+              ? (d.deployKm >= 300 && d.deployKm <= d.distanceKm
+                 && d.bonus == math.round(50 * math.pow(d.deployKm / 100.0, 1.5)))
+              : (d.bonus == 0 && d.deployKm == 0))
+        && d.score == d.distanceKm + d.bonus + d.coins * 5;
+    }
+    match /leaderboard/{id} {
+      allow get: if true;
+      allow list: if request.query.limit != null && request.query.limit <= 50;   // top-N / rank count, no full dumps
+      allow update, delete: if false;
+      allow create: if lbShapeOk(incoming()) && lbMathOk(incoming())
+        && serverStamped('createdAt')
+        && throttledIn('throttleLb', incoming().cid);
+    }
 
     // everything else is closed
     match /{document=**} {
