@@ -13,7 +13,7 @@
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
-  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s6" />
+  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s6b" />
   <title>Launch Pad</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
@@ -413,10 +413,10 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=gp1-beta-s6"></script>
-  <script src="audio.js?v=gp1-beta-s6"></script>
-  <script src="liftoff.js?v=gp1-beta-s6"></script>
-  <script src="flight.js?v=gp1-beta-s6"></script>
+  <script src="modular.js?v=gp1-beta-s6b"></script>
+  <script src="audio.js?v=gp1-beta-s6b"></script>
+  <script src="liftoff.js?v=gp1-beta-s6b"></script>
+  <script src="flight.js?v=gp1-beta-s6b"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -424,7 +424,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6b";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1236,7 +1236,8 @@
       const handoff = (seamOpts && seamOpts.handoff) || null;
       // v4 composite: keep flight canvas invisible until first mid-air frame, then crossfade over pad.
       if (fromPadSeam) {
-        flCanvas.style.opacity = "0";
+        // v6b: flight paints under pad at opacity 1; pad layers cover until snap match.
+        flCanvas.style.opacity = "1";
         flCanvas.style.transition = "none";
       }
       f.start({
@@ -1257,42 +1258,52 @@
       f.o.onHudReveal = () => { if (fromPadSeam) revealFlightChrome(); };
       if (fromPadSeam) {
         flDeploy.classList.remove("on"); flPause.classList.remove("on");
-        // v6: keep pad on top until flight settle frame matches (zoom/lb/rocket). Hide flight
-        // until identical, then short reveal — kills the 0.28s mismatched crossfade cut.
+        // v6b: pad stack+FX sit ABOVE flight (z 36 > 30). Flight paints matched settle underneath
+        // at opacity 1. Snap-hide pad only when rocket screen height / lb / nose match — no crossfade
+        // ghosting of two plume styles (CoE 13.75 cut / ~3× size pop).
+        const stackEl = $("stack"), fxEl = $("fxCanvas");
+        const bumpZ = (el, z) => { if (el) { el.style.zIndex = String(z); } };
+        bumpZ(stackEl, 36); bumpZ(fxEl, 37);
+        try { if (liftoffEngine && liftoffEngine._seamLbEl) liftoffEngine._seamLbEl.style.zIndex = "38"; } catch (_) {}
+        flCanvas.style.transition = "none";
+        flCanvas.style.opacity = "1"; // under pad; invisible until pad snaps away
         let revealed = false;
         const ho = handoff || {};
+        const padRocketH = ho.rocketScreenH || ((ho.stackHcss || 300) * (ho.zoom || 1));
+        const finishReveal = () => {
+          if (revealed) return;
+          revealed = true;
+          // Instant snap: remove pad rocket; keep pad FX plume ~180ms so flame doesn't stub-swap.
+          // Enable flight flame only AFTER pad FX is gone (no dual-plume ghost).
+          clearStackOverlay();
+          setTimeout(() => {
+            if (fxEl) { fxEl.style.display = "none"; fxEl.style.zIndex = ""; }
+            try { if (liftoffEngine && liftoffEngine._hideSeamLetterbox) liftoffEngine._hideSeamLetterbox(); } catch (_) {}
+            try { if (liftoffEngine && liftoffEngine.endLinger) liftoffEngine.endLinger(); } catch (_) {}
+            try { if (flight && flight.markSeamRevealed) flight.markSeamRevealed(); } catch (_) {}
+            bumpZ(stackEl, ""); bumpZ(fxEl, "");
+          }, 180);
+        };
         const tryReveal = () => {
           if (revealed || !flight) return;
           const st = flight;
-          const lbMatch = ho.seamLbA == null || Math.abs((st.lbA || 0) - ho.seamLbA) < 0.14;
-          const zOk = st.camZoom != null && st.camZoom <= 1.08;
-          const settled = st.phase === "settle" && (st.phaseT || 0) >= 0.02;
-          if (settled && lbMatch && zOk) {
-            revealed = true;
-            flCanvas.style.transition = "opacity 0.10s linear";
-            flCanvas.style.opacity = "1";
-            setTimeout(() => {
-              clearStackOverlay();
-              try { if (liftoffEngine && liftoffEngine._hideSeamLetterbox) liftoffEngine._hideSeamLetterbox(); } catch (_) {}
-              flCanvas.style.transition = "";
-            }, 120);
+          const fs = window.__flightState || {};
+          const settled = st.phase === "settle" && (st.phaseT || 0) >= 0.016;
+          const lbMatch = ho.seamLbA == null || Math.abs((st.lbA || 0) - ho.seamLbA) < 0.10;
+          // Rocket screen height within 10% (the ~3× pop was ~300% — this is the real gate)
+          const flH = fs.rocketScreenH != null ? fs.rocketScreenH
+            : ((st.camZoom || 1) * 208 * (flight.s || (st.s) || 0.5));
+          const scaleMatch = padRocketH < 1 || Math.abs(flH - padRocketH) / padRocketH < 0.10;
+          const hudOff = !(st._hudOn || fs.hudOn);
+          if (settled && lbMatch && scaleMatch && hudOff) {
+            finishReveal();
           } else {
             requestAnimationFrame(tryReveal);
           }
         };
         requestAnimationFrame(() => requestAnimationFrame(tryReveal));
-        // Safety: never leave flight invisible
-        setTimeout(() => {
-          if (revealed) return;
-          revealed = true;
-          flCanvas.style.transition = "opacity 0.12s linear";
-          flCanvas.style.opacity = "1";
-          setTimeout(() => {
-            clearStackOverlay();
-            try { if (liftoffEngine && liftoffEngine._hideSeamLetterbox) liftoffEngine._hideSeamLetterbox(); } catch (_) {}
-            flCanvas.style.transition = "";
-          }, 140);
-        }, 480);
+        // Safety: never leave pad forever if match never fires
+        setTimeout(() => { finishReveal(); }, 900);
       } else {
         flCanvas.style.opacity = "1";
         revealFlightChrome();

@@ -3,8 +3,8 @@
  * Cellular flame (hull-scaled, altitude plume), dithered opaque smoke, long t² flight
  * with accelerating follow cam, altitude sky + parallax clouds / streaking stars.
  * Timing: T-5 countdown, T-2 ignition, 0.5s hold, t² climb + zoom-out, mid-air handoff (no exit fly-off).
- * gp1-beta seam v6: zoom-out from liftoff continuously into play scale; letterbox co-eases with zoom;
- * matched pad→flight handoff (no cut/teleport); box tosses with zoom, never snaps full.
+ * gp1-beta seam v6b: zoom to TRUE play rocket screen height (fix ~3× join pop); full lb by handoff;
+ * linger (no freeze); pad plume held across snap reveal; no HUD/earth pop.
  */
 (function (global) {
   "use strict";
@@ -15,15 +15,20 @@
   const CLIMB_DUR = 2.45;  // v6: hand off ~2.31–2.45 into play (was 4.2; kills vanish/snap dead air)
   const EXIT_DUR = 0.0;    // unused — no off-screen exit; flight owns settle after handoff
   const HANDOFF_ZOOM_LAND = 0.92; // landscape: prefer handoff once zoomed out past this (or at CLIMB_DUR)
-  const HANDOFF_ZOOM_PORT = 0.74; // v6: portrait handoff once near play scale (zoom from liftoff hits earlier)
+  const HANDOFF_ZOOM_PORT = 0.22; // v6b: portrait handoff once near TRUE play rocket screen height
   const CLIMB_A = 140;
   const ZOOM_LAND_MIN = 0.80; // landscape follow zoom-out (ceiling of the adaptive target)
   const ZOOM_LAND_FLOOR = 0.58; // landscape zoom floor: adaptive per stack (tall stacks need room for the plume)
-  const ZOOM_PORT_MIN = 0.62; // portrait zoom floor (play scale)
-  const ZOOM_PORT_TARGET = 0.70; // play-scale handoff framing (maps to flight camZoom≈1)
-  const ZOOM_PORT_START_T = 0.00; // v6: zoom-out begins at liftoff (climbT=0), not late 1.0 tug
-  const ZOOM_PORT_END_T = 2.35;   // v6: reach ~0.70 by handoff — continuous into play
-  const SEAM_LB_AT_HANDOFF = 0.62; // v6: box co-eases with zoom; partial at handoff, settle finishes
+  // v6b: pad plate is cover-fit (dh≈wrapH). At z=0.70 rocket is ~3–4× flight play size — THAT was the join pop.
+  // Target zoom so pad rocket CSS height == flight play rocket (ROCKET_LEN * layoutS).
+  const ZOOM_PORT_MIN = 0.16; // floor — true play-equivalent on portrait cover-fit
+  const ZOOM_PORT_TARGET = 0.185; // ≈ play rocket screen height; refined per-stack in _portPlayZoom()
+  const ZOOM_PORT_START_T = 0.00; // zoom-out begins at liftoff
+  const ZOOM_PORT_END_T = 2.15;   // reach play-equivalent size before CLIMB_DUR so spring settles
+  const SEAM_LB_AT_HANDOFF = 1.00; // v6b: full play letterbox by handoff (match settle0 bars)
+  const FLIGHT_ROCKET_LEN = 208;  // must match flight.js ROCKET_LEN
+  const FLIGHT_MIN_VIEW_W = 760;  // must match flight.js MIN_VIEW_W
+  const FLIGHT_WORLD_H = 720;
   const PLUME_MIN_CSS = 170;  // landscape follow: keep >=170 px of plume on screen below the nozzle
   const NOSE_FRAC = 0.10;     // portrait: nose ~10% below the top edge during follow (open frame)
   const NOSE_FRAC_LAND = 0.05; // landscape: nose ~5% below the top edge
@@ -2024,8 +2029,27 @@
     if (this._seamLbEl) this._seamLbEl.style.display = "none";
     this._seamLbA = 0;
   };
+  LiftoffEngine.prototype.endLinger = function () {
+    // Called by index after snap reveal — stop pad sim + FX so flight owns the frame.
+    this.running = false;
+    this.phase = "done";
+    this.finished = true;
+    try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "done", running: false, finished: true }); } catch (_) {}
+  };
 
-  LiftoffEngine.prototype.applyTransforms = function (seat) {
+
+  LiftoffEngine.prototype._portPlayZoom = function () {
+    // Pad plate is cover-fit (dh ≈ wrapH). Flight play rocket CSS height = ROCKET_LEN * layoutS.
+    // Zoom target makes pad rocket CSS height match that — kills the ~3× join size pop.
+    const wrapW = this._wrapW || 390, wrapH = this._wrapH || 844;
+    let s = wrapH / FLIGHT_WORLD_H, viewW = wrapW / s;
+    if (viewW < FLIGHT_MIN_VIEW_W) s = wrapW / FLIGHT_MIN_VIEW_W;
+    const playRocketCss = FLIGHT_ROCKET_LEN * s;
+    const stackH = this._stackHcss || 300;
+    return clamp(playRocketCss / Math.max(1, stackH), ZOOM_PORT_MIN, 0.55);
+  };
+
+    LiftoffEngine.prototype.applyTransforms = function (seat) {
     const lb = this._lb;
     if (!lb) return;
     const scaleY = lb.height / lb.nh;
@@ -2069,17 +2093,22 @@
         const tgtL = wrapH * NOSE_FRAC_LAND;
         const blendOk = this.getTodId() !== "03" || (this._altBlendU || 0) >= 0.999;
         if (D > 1 && blendOk) zAllowed = clamp((wrapH + 8 - tgtL) / D, this._zoomLand || ZOOM_LAND_MIN, 1);
+      } else if (this.phase === "linger" && this._handoffZoom != null) {
+        // Freeze at handoff zoom — pad must not keep shrinking while flight is seeded to that size.
+        zAllowed = this._handoffZoom;
       } else {
-        // Portrait composite seam (v6): zoom-out from liftoff continuously into play scale.
-        // v5 started at climbT 1.0→2.40 (late tug then canvas swap). v6 pulls from climbT=0 so
-        // by handoff zoom≈ZOOM_PORT_TARGET (flight play scale) — one camera into play.
+        // Portrait composite seam (v6b): zoom from liftoff to TRUE play rocket screen height.
+        // Cover-fit pad at z=0.70 leaves rocket ~3–4× flight play size (CoE join pop). Aim so
+        // pad rocket CSS height == flight ROCKET_LEN * layoutS before handoff.
+        const zPlay = this._portPlayZoom();
+        this._zoomPortTarget = zPlay;
         const zu = smooth01(ZOOM_PORT_START_T, ZOOM_PORT_END_T, this.climbT);
-        zAllowed = 1 + (ZOOM_PORT_TARGET - 1) * zu;
+        zAllowed = 1 + (zPlay - 1) * zu;
       }
       {
         // Critically damped spring toward the allowed zoom (~0.6 s settle, C1: velocity starts
         // at 0 -> no jerk). A lagging spring on a falling bound stays above it -> plate never shows.
-        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = landscape ? 12 : 22; // v6: tighter portrait track so from-liftoff schedule hits ~0.70 by handoff
+        const dtz = Math.min(0.05, this._lastDt || 1 / 60), W = landscape ? 12 : 28; // v6b: tight track across 1.0→~0.18 play-equivalent zoom
         let zs = this._zoomS || 1, vz = this._zoomV || 0;
         const acc = W * W * (zAllowed - zs) - 2 * W * vz;
         vz += acc * dtz; zs += vz * dtz;
@@ -2087,6 +2116,12 @@
         if (zs > 1) { zs = 1; vz = 0; }
         this._zoomS = zs; this._zoomV = vz;
         z = zs;
+      }
+      // Hard-pin zoom during linger so pad framing cannot drift from flight seed
+      if (this.phase === "linger" && this._handoffZoom != null) {
+        z = this._handoffZoom;
+        this._zoomS = z;
+        this._zoomV = 0;
       }
       // v6: as letterbox grows, park nose inside the visible band (not full-viewport 10%)
       // so pad last frame matches flight settle framing (rocket sits in the play strip).
@@ -2136,11 +2171,14 @@
     // Drive from zoom progress so box + pull-out stay locked; leave headroom for settle finish.
     {
       let lbU = 0;
-      if (this.phase === "climb" && !landscape) {
+      if (this.phase === "linger" && this._handoffLbA != null && !landscape) {
+        lbU = this._handoffLbA; // freeze lb with zoom at handoff framing
+      } else if ((this.phase === "climb" || this.phase === "linger") && !landscape) {
         const zNow = this._zoom || 1;
-        const zoomProg = clamp((1 - zNow) / Math.max(1e-6, 1 - ZOOM_PORT_TARGET), 0, 1);
-        // Start box slightly after zoom begins; arrive ~SEAM_LB_AT_HANDOFF when zoom hits play.
-        lbU = SEAM_LB_AT_HANDOFF * smooth01(0.06, 0.98, zoomProg);
+        const zPlay = this._zoomPortTarget || ZOOM_PORT_TARGET;
+        const zoomProg = clamp((1 - zNow) / Math.max(1e-6, 1 - zPlay), 0, 1);
+        // Co-ease with zoom; arrive full play letterbox when zoom hits play-equivalent size.
+        lbU = SEAM_LB_AT_HANDOFF * smooth01(0.04, 0.98, zoomProg);
       } else if (this.phase === "done") {
         lbU = this._seamLbA || 0;
       }
@@ -2179,6 +2217,32 @@
     try { global.__liftoffPerf = this.perf; } catch (_) {}
 
     if (!this._fxReady && !this.prepareFx()) return;
+
+
+    // v6b linger: hold last climb framing, keep plume/FX alive (no freeze) until index ends linger
+    if (this.phase === "linger") {
+      this._lingerT = (this._lingerT || 0) + dt;
+      this.flameIntensity = lerp(this.flameIntensity, 1.25, 0.08);
+      this.shake = Math.max(0, (this.shake || 0) - 6 * dt);
+      this.updateParticles(dt);
+      const seatL = this.getSeat() || {
+        cx: 640, sitY: 548, deckY: 548, nozzleY: 548, smokeY: 548,
+        width: 140, nozzles: [0], nw: 1280, nh: 720, targetH: 500,
+      };
+      if (this._lb) { seatL.nw = this._lb.nw; seatL.nh = this._lb.nh; }
+      this.applyTransforms(seatL);
+      this.drawFx(seatL);
+      this.drawAltSky(dt);
+      try {
+        global.__liftoffState = Object.assign({}, global.__liftoffState, {
+          phase: "linger", climbT: this.climbT, zoom: this._zoom, seamLbA: this._seamLbA || 0,
+          flame: this.flameIntensity, finished: true, running: true, lingerT: this._lingerT,
+        });
+      } catch (_) {}
+      // safety: auto-end linger after 1.2s if index never calls endLinger
+      if (this._lingerT > 1.2) this.endLinger();
+      return;
+    }
 
     const elapsed = this._simTime;
     const seat = this.getSeat() || {
@@ -2259,16 +2323,24 @@
           : (this._tipLocal0 != null ? z * (this._tipLocal0 - this.rocketY * ((this._lb && this._lb.height / this._lb.nh) || 1)) + (this._camYi || 0) : wrapH * 0.2);
         // v6: zoom starts at liftoff so play scale arrives earlier — allow early handoff once near target.
         // Prefer CLIMB_DUR; early ok when zoom≈play and box has tossed with it.
-        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND) : (t >= 2.15 && z <= HANDOFF_ZOOM_PORT);
+        const zPlay = this._zoomPortTarget || ZOOM_PORT_TARGET;
+        const earlyZoom = landscape ? (t >= 2.15 && z <= HANDOFF_ZOOM_LAND)
+          : (t >= 2.20 && z <= zPlay * 1.30); // within ~30% of play size (flight seeds from rocketScreenH)
         // Follow parks nose in the visible band — that is healthy framing, NOT a vanish.
         // Only nearTop-bail if nose is truly leaving the frame (<1% / negative).
         const nearTop = t >= 2.3 && noseSy < wrapH * 0.01;
-        // v6 target: handoff into play ~2.2–2.45 with zoom~0.70 + seamLbA~0.55–0.65 (co-eased).
+        // v6b target: handoff ~2.2–2.45 at true play rocket screen height + full letterbox.
         if (t >= CLIMB_DUR || earlyZoom || nearTop) {
-          this.running = false;
+          // v6b: do NOT freeze the pad — enter linger so plume/FX keep animating until
+          // index snaps the join (kills the 13.70–13.75 stall frame on the Ateeb clip).
           this.finished = true;
-          this.phase = "done";
+          this.phase = "linger";
+          this._lingerT = 0;
+          this._handoffZoom = z; // freeze pad zoom at this exact join size
+          this._handoffLbA = this._seamLbA || 0;
           this.stopAudio(false);
+          const stackH = this._stackHcss || 300;
+          const rocketScreenH = stackH * z;
           const handoff = {
             seamFromPad: true,
             zoom: z,
@@ -2281,10 +2353,14 @@
             noseScreenY: noseSy,
             wrapW: (wrap && wrap.clientWidth) || this._wrapW || 390,
             wrapH: wrapH,
+            stackHcss: stackH,
+            rocketScreenH: rocketScreenH,
+            zoomPortTarget: this._zoomPortTarget || ZOOM_PORT_TARGET,
           };
-          try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "done", finished: true, running: false, handoff: handoff }); } catch (_) {}
+          try { global.__liftoffState = Object.assign({}, global.__liftoffState, { phase: "linger", finished: true, running: true, handoff: handoff }); } catch (_) {}
           if (this.onPerfSample) this.onPerfSample(this.perf.slice());
           this.onComplete(handoff);
+          // fall through — same tick still draws FX; subsequent ticks run linger
           return;
         }
       }

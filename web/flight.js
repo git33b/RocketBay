@@ -1,5 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
- * GP1-BETA s6: continuous zoom-from-liftoff into play (matched handoff, no cut/teleport), tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
+ * GP1-BETA s6b: kill 13.75 cut — match framing/plume pre-reveal; no freeze/HUD/earth pop, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
@@ -21,7 +21,7 @@
   const CLIMB_T = 3.4, PITCH_T = 1.85;       // climb kept for non-seam paths; pitch after settle
   const SEAM_ZOOM0 = 1.82;                   // legacy pad-column framing (unused when seamFromPad)
   const SEAM_ZOOM1 = 1.28;                   // legacy end-of-climb zoom
-  const ZOOM_PORT_REF = 0.70;               // pad play-scale target → maps handoff.zoom into flight camZoom
+  // v6b: camZoom seeded from handoff.rocketScreenH / (ROCKET_LEN*s) — no ZOOM_PORT_REF map
   const SETTLE_T = 0.72;                     // short settle — pad already at play framing; ~1-2s sooner to control
   const SETTLE_ZOOM0 = 1.00;                 // v6: pad hands off at play scale → seed 1.0 (no 0.70→1.00 / 1.06 tug)
   const HUD_ZOOM_ON = 1.04;                  // game HUD appears once camZoom reaches gameplay scale
@@ -330,13 +330,17 @@
       this.phase = "settle"; this.phaseT = 0;
       this.cam = -120; this.camY = 0; this.dist = 0;
       const ho = (cfg && cfg.handoff) || {};
-      // Pad z≈ZOOM_PORT_REF(0.70) → flight camZoom 1.0 (play). No settle tug if already there.
+      // v6b: seed camZoom from pad rocket SCREEN HEIGHT so join size matches (fixes ~3× pop).
+      // playCssH = ROCKET_LEN * layoutS; z0 = rocketScreenH / playCssH (≥1 if pad still larger).
       let z0 = SETTLE_ZOOM0;
-      if (ho.zoom != null && ho.zoom > 0) {
-        if (Math.abs(ho.zoom - ZOOM_PORT_REF) <= 0.06) z0 = 1.0;
-        else z0 = clamp(1 + (ho.zoom - ZOOM_PORT_REF) * 0.55, 1.0, 1.15);
+      const playCssH = ROCKET_LEN * this.s;
+      if (ho.rocketScreenH != null && ho.rocketScreenH > 0 && playCssH > 1) {
+        z0 = clamp(ho.rocketScreenH / playCssH, 1.0, 4.5);
+      } else if (ho.zoom != null && ho.zoom > 0 && ho.stackHcss > 0 && playCssH > 1) {
+        z0 = clamp((ho.stackHcss * ho.zoom) / playCssH, 1.0, 4.5);
       }
-      const lb0 = (this.letterbox && ho.seamLbA != null) ? clamp(ho.seamLbA, 0, 0.85) : (this.letterbox ? 0.45 : 0);
+      // Prefer full letterbox at join when pad arrived at play framing (lb≈1).
+      const lb0 = (this.letterbox && ho.seamLbA != null) ? clamp(ho.seamLbA, 0, 1) : (this.letterbox ? 0.85 : 0);
       this.camZoom = z0; this._settleZoom0 = z0;
       this.lbA = lb0; this._settleLb0 = lb0; this.climbExit = 1;
       this.px = this.viewW * 0.5;
@@ -344,22 +348,23 @@
       let py0 = 360;
       if (ho.noseScreenY != null && ho.wrapH > 0 && this.letterbox) {
         const ch = ho.wrapH, cw = ho.wrapW || 390;
-        let s = ch / WORLD_H, viewW = cw / s;
-        if (viewW < MIN_VIEW_W) s = cw / MIN_VIEW_W;
-        const bandH = WORLD_H * s;
-        const oy = Math.max(0, (ch - bandH) / 2);
+        // Use live layout s/oy so nose maps into the same band flight draws.
+        const s = this.s, oy = this.oy;
         const bar = oy * lb0;
-        // nose → approx rocket centre in design px (vertical stack, axis ~0.42 len below nose)
-                const noseInBand = (ho.noseScreenY - bar) / Math.max(1e-3, s);
-        // Nose-high in the play strip (pad follow). Soft clamp — avoid floor/ceiling teleport.
-        py0 = clamp(noseInBand + ROCKET_LEN * 0.42, 240, 420);
+        // Nose screen Y → design py (rocket axis below nose by ~0.42 len at current z0).
+        const noseInBand = (ho.noseScreenY - bar) / Math.max(1e-3, s);
+        // Account for camZoom scale around py: nose is above axis by (axisFrac * ROCKET_LEN * z0)
+        // With tilt=-PI/2, sprite is vertical; axis≈0.42 from nose along length.
+        py0 = clamp(noseInBand + ROCKET_LEN * 0.42 * z0, 180, 520);
       }
       this.py = py0; this.vy = -70; this.tilt = -Math.PI / 2;
       this.speed = 0; this.hazardsOn = false; this._climbShake = 0;
       this._hudOn = false; this._settlePy0 = py0;
       this.bodyY = 720;
-      this._seamHideBody = true; // v6: suppress earth limb until pitch (pad last frame is starfield)
-      // Continue pad plume (handoff.flame) — no second engine-start blast; keep readable into settle
+      this._seamHideBody = true; // v6b: suppress earth until after reveal / pitch
+      this._seamRevealed = false; // index sets true on snap — HUD + flight plume wait on this
+      this._seamSuppressFlame = true; // pad FX plume stays on top across the join
+      // Continue pad plume intensity (handoff.flame) for after pad FX releases
       const fl = (ho.flame != null && ho.flame > 0) ? clamp(ho.flame / 1.35, 0.55, 1) : 0.9;
       this._seamPlume = fl;
       this._log("settle", this.t);
@@ -419,6 +424,11 @@
     }
   };
   P.hudVisible = function () { return !!this._hudOn; };
+  P.markSeamRevealed = function () {
+    // Index calls this on snap — flight may show plume; HUD still waits a beat.
+    this._seamRevealed = true;
+    this._seamSuppressFlame = false;
+  };
 
   /* ---- input ---- */
   P.setHold = function (on) {
@@ -470,9 +480,12 @@
     const hold = this.bot ? this._botHold : this.holding;
     if (this.phase === "settle") {
       // Mid-air composite: finish zoom-OUT + letterbox ease from pad-seeded values; HUD; fall-back.
-      const u = clamp(this.phaseT / SETTLE_T, 0, 1);
-      const eu = ease(u);
+      // v6b: if pad handed off still-large (z0>1), take longer to ease to play so join isn't a tug.
       const z0 = this._settleZoom0 != null ? this._settleZoom0 : SETTLE_ZOOM0;
+      const settleDur = z0 > 1.15 ? SETTLE_T * clamp(z0 / 1.15, 1, 2.2) : SETTLE_T;
+      this._settleDur = settleDur;
+      const u = clamp(this.phaseT / settleDur, 0, 1);
+      const eu = ease(u);
       this.camZoom = z0 + (1 - z0) * eu;
       const lb0 = this._settleLb0 != null ? this._settleLb0 : 0;
       const lbU = clamp((u - LB_EASE_START) / Math.max(1e-6, LB_EASE_END - LB_EASE_START), 0, 1);
@@ -486,14 +499,14 @@
       this.speed = SPEED0 * 0.15 * eu;
       this.cam += this.speed * dt;
       this.bodyY = 720;
-      // v6: when seeded at play zoom (1.0), don't flash HUD on frame 0 — ease it in mid-settle.
+      // v6b: NEVER pop FLIGHT HUD with the canvas swap — wait until after snap reveal + beat.
       if (this.cfg && this.cfg.seamFromPad) {
-        if (this.phaseT >= SETTLE_T * 0.45) this._hudOn = true;
+        if (this._seamRevealed && this.phaseT >= (this._settleDur || SETTLE_T) * 0.75) this._hudOn = true;
       } else if (this.camZoom <= HUD_ZOOM_ON) {
         this._hudOn = true;
       }
       this._notifyHud();
-      if (this.phaseT >= SETTLE_T) {
+      if (this.phaseT >= (this._settleDur || SETTLE_T)) {
         this.phase = "pitch"; this.phaseT = 0;
         this.camZoom = 1; this._pitchZoom0 = 1; this._climbShake = 0;
         this._pitchFromPy = py0 + SETTLE_FALL;
@@ -1247,6 +1260,7 @@
       global.__flightState = {
         phase: this.phase, phaseT: this.phaseT, t: this.t,
         camZoom: this.camZoom, camY: this.camY, lbA: this.lbA,
+        rocketScreenH: (ROCKET_LEN * (this.s || 1) * (this.camZoom || 1)),
         px: this.px, py: this.py, tilt: this.tilt, hudOn: !!this._hudOn,
         seamFromPad: !!(this.cfg && this.cfg.seamFromPad),
       };
@@ -1298,8 +1312,10 @@
       this._drawFlight(x, true);
     }
     // Single rocket in seam camera space — scale tracks camZoom continuously (still inside play clip)
-    const thrusting = this.phase === "climb" || this.phase === "pitch" || (this.phase === "settle" && this.phaseT < SETTLE_T * 0.55);
-    const plume = this.phase === "climb" ? CLIMB_PLUME
+    const seamHoldFlame = this.phase === "settle" && this._seamSuppressFlame;
+    const thrusting = !seamHoldFlame && (this.phase === "climb" || this.phase === "pitch" || (this.phase === "settle" && this.phaseT < SETTLE_T * 0.55));
+    const plume = seamHoldFlame ? 0
+      : this.phase === "climb" ? CLIMB_PLUME
       : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.40 * clamp(this.phaseT / SETTLE_T, 0, 1)))
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
     const sh = this._climbShake || 0;
@@ -1463,8 +1479,9 @@
             x.beginPath(); x.ellipse(this.px, this.py, ROCKET_LEN * 0.58, 34, this.tilt, 0, Math.PI * 2); x.stroke();
           }
         }
-        const thrusting = (this.phase === "climb" || this.phase === "pitch" || this.phase === "settle" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0);
-        this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1))) : 1);
+        const seamHoldFlame = this.phase === "settle" && this._seamSuppressFlame;
+        const thrusting = !seamHoldFlame && ((this.phase === "climb" || this.phase === "pitch" || this.phase === "settle" || this.phase === "tutorial") || ((this.phase === "flight" || this.phase === "practice") && (this.bot ? this._botHold : this.holding) && this.fuel > 0));
+        this._drawRocket(x, this.px, this.py, this.tilt, 1, thrusting, seamHoldFlame ? 0 : (this.phase === "pitch" ? (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1))) : 1));
         // exhaust sparks from engine nozzles only (gp1 P1#11)
         if (thrusting && (this.phase === "flight" || this.phase === "practice") && (Math.floor(this.t * 40) % 2 === 0)) {
           const nos = (this.sp && this.sp.nozzles) || [{ y: 0, s: 1 }];
