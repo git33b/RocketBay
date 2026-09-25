@@ -13,7 +13,7 @@
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
-  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s6b4" />
+  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s6b5" />
   <title>Launch Pad</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
@@ -413,10 +413,10 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=gp1-beta-s6b4"></script>
-  <script src="audio.js?v=gp1-beta-s6b4"></script>
-  <script src="liftoff.js?v=gp1-beta-s6b4"></script>
-  <script src="flight.js?v=gp1-beta-s6b4"></script>
+  <script src="modular.js?v=gp1-beta-s6b5"></script>
+  <script src="audio.js?v=gp1-beta-s6b5"></script>
+  <script src="liftoff.js?v=gp1-beta-s6b5"></script>
+  <script src="flight.js?v=gp1-beta-s6b5"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -424,7 +424,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6b4";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6b5";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1258,9 +1258,8 @@
       f.o.onHudReveal = () => { if (fromPadSeam) revealFlightChrome(); };
       if (fromPadSeam) {
         flDeploy.classList.remove("on"); flPause.classList.remove("on");
-        // v6b4: #flightCanvas AND #stage are both position:fixed. Raising #world alone cannot
-        // beat flight (world z is trapped in #stage). Raise #stage above flight for the overlap.
-        // Snap: drop stage z, restore flight z=30 so flight owns the frame.
+        // v6b5: #flightCanvas AND #stage are both position:fixed. Raise #stage above flight
+        // for pad FX+scenery composite; crossfade plate/sky then morph plume before teardown.
         const stackEl = $("stack"), fxEl = $("fxCanvas"), stageEl = $("stage");
         const bumpZ = (el, z) => { if (el) { el.style.zIndex = z === "" ? "" : String(z); } };
         bumpZ(stageEl, 40);          // entire pad stage above fixed flight
@@ -1272,22 +1271,53 @@
         let revealed = false;
         const ho = handoff || {};
         const padRocketH = ho.rocketScreenH || ((ho.stackHcss || 300) * (ho.zoom || 1));
+        // v6b5: plume hold/morph 0.5–0.6s + scenery crossfade under rocket (no organic→stub / pad→starfield snap)
+        const PLUME_HOLD_MS = 560;
+        const SCENERY_FADE_MS = 480;
+        const ROCKET_SWAP_MS = 220;   // keep pad rocket until flight shows through fading scenery
+        const PLUME_FADE_MS = 240;    // last beat: fade pad FX while flight morph plume takes over
         const finishReveal = () => {
           if (revealed) return;
           revealed = true;
-          // Instant snap: remove pad rocket; keep pad FX plume ~180ms so flame doesn't stub-swap.
-          // Enable flight flame only AFTER pad FX is gone (no dual-plume ghost).
-          clearStackOverlay();
+          // During climb/linger plate is already hidden — pad scenery lives on #tallSky (+ #altSky).
+          // Fade those only (NOT #fxCanvas / plateWrap) so organic plume stays composited.
+          const altEl = $("altSky");
+          const tallEl = $("tallSky");
+          const skyEl = $("skyExt");
+          const sceneryEls = [altEl, tallEl, skyEl].filter(Boolean);
+          // Transparent stage so fading tallSky reveals flight underlay (matched scenery frames)
+          if (stageEl) stageEl.style.background = "transparent";
+          sceneryEls.forEach((el) => {
+            el.style.transition = "opacity " + SCENERY_FADE_MS + "ms ease-out";
+            el.style.opacity = "0";
+          });
+          // Keep pad rocket + organic FX on top through early fade (no body-less flame gap)
           setTimeout(() => {
-            if (fxEl) { fxEl.style.display = "none"; fxEl.style.zIndex = ""; }
+            clearStackOverlay();
+            // Flight flame morph starts under still-visible pad FX
+            try { if (flight && flight.markSeamRevealed) flight.markSeamRevealed(); } catch (_) {}
+          }, ROCKET_SWAP_MS);
+          setTimeout(() => {
+            if (fxEl) {
+              fxEl.style.transition = "opacity " + PLUME_FADE_MS + "ms ease-out";
+              fxEl.style.opacity = "0";
+            }
+          }, Math.max(0, PLUME_HOLD_MS - PLUME_FADE_MS));
+          setTimeout(() => {
+            if (fxEl) {
+              fxEl.style.display = "none";
+              fxEl.style.zIndex = "";
+              fxEl.style.opacity = "";
+              fxEl.style.transition = "";
+            }
+            sceneryEls.forEach((el) => { el.style.transition = ""; el.style.opacity = ""; });
+            if (stageEl) stageEl.style.background = "";
             try { if (liftoffEngine && liftoffEngine._hideSeamLetterbox) liftoffEngine._hideSeamLetterbox(); } catch (_) {}
             try { if (liftoffEngine && liftoffEngine.endLinger) liftoffEngine.endLinger(); } catch (_) {}
-            // Drop pad stage below flight, restore flight z — flight now owns the frame
             bumpZ(stageEl, "");
             bumpZ(stackEl, ""); bumpZ(fxEl, "");
             flCanvas.style.zIndex = "30";
-            try { if (flight && flight.markSeamRevealed) flight.markSeamRevealed(); } catch (_) {}
-          }, 180);
+          }, PLUME_HOLD_MS);
         };
         const tryReveal = () => {
           if (revealed || !flight) return;
@@ -1307,8 +1337,8 @@
           }
         };
         requestAnimationFrame(() => requestAnimationFrame(tryReveal));
-        // Safety: never leave pad forever if match never fires
-        setTimeout(() => { finishReveal(); }, 900);
+        // Safety: never leave pad forever if match never fires (room for 560ms hold)
+        setTimeout(() => { finishReveal(); }, 1400);
       } else {
         flCanvas.style.opacity = "1";
         revealFlightChrome();

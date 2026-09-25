@@ -3,8 +3,8 @@
  * Cellular flame (hull-scaled, altitude plume), dithered opaque smoke, long t² flight
  * with accelerating follow cam, altitude sky + parallax clouds / streaking stars.
  * Timing: T-5 countdown, T-2 ignition, 0.5s hold, t² climb + zoom-out, mid-air handoff (no exit fly-off).
- * gp1-beta seam v6b: zoom to TRUE play rocket screen height (fix ~3× join pop); full lb by handoff;
- * linger (no freeze); pad plume held across snap reveal; no HUD/earth pop.
+ * gp1-beta seam v6b5: zoom to TRUE play rocket screen height; full lb by handoff;
+ * linger; pad plume held/morphed 0.5–0.6s + scenery crossfade across reveal; no HUD/earth pop.
  */
 (function (global) {
   "use strict";
@@ -2241,8 +2241,8 @@
           flameDbg: global.__liftoffFlameDbg || null,
         });
       } catch (_) {}
-      // safety: auto-end linger after 1.2s if index never calls endLinger
-      if (this._lingerT > 1.2) this.endLinger();
+      // safety: auto-end linger after 2.0s if index never calls endLinger (v6b5 hold ~0.56s)
+      if (this._lingerT > 2.0) this.endLinger();
       return;
     }
 

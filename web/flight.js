@@ -1,5 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g
- * GP1-BETA s6b: kill 13.75 cut — match framing/plume pre-reveal; no freeze/HUD/earth pop, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
+ * GP1-BETA s6b5: plume hold/morph + scenery crossfade across reveal; keep scale/lb/no-second-climb, tilt-on-thrust, BH purple/blue pull VFX, bigger crash,
  * deadly outlines, chrome tax (via index). BH knobs unchanged (bh1g global pull).
  * flight-pack-v1.3.2 + BLACKHOLE v1: native 216×212 BH, bh1g = global pull (any dist) + bh1f strong-G,
  * core-only hitbox, spin, soft falloff a=BH_G/(BH_FALL*r+BH_SOFT) (fights at range; no soft-R free zone),
@@ -22,7 +22,7 @@
   const SEAM_ZOOM0 = 1.82;                   // legacy pad-column framing (unused when seamFromPad)
   const SEAM_ZOOM1 = 1.28;                   // legacy end-of-climb zoom
   // v6b: camZoom seeded from handoff.rocketScreenH / (ROCKET_LEN*s) — no ZOOM_PORT_REF map
-  const SETTLE_T = 0.72;                     // short settle — pad already at play framing; ~1-2s sooner to control
+  const SETTLE_T = 1.00;                     // v6b5: room for 0.55s plume morph after reveal before pitch
   const SETTLE_ZOOM0 = 1.00;                 // v6: pad hands off at play scale → seed 1.0 (no 0.70→1.00 / 1.06 tug)
   const HUD_ZOOM_ON = 1.04;                  // game HUD appears once camZoom reaches gameplay scale
   const SETTLE_FALL = 40;                    // v6: gentler fall (matched mid-air; was 55 pop-feel)
@@ -425,9 +425,11 @@
   };
   P.hudVisible = function () { return !!this._hudOn; };
   P.markSeamRevealed = function () {
-    // Index calls this on snap — flight may show plume; HUD still waits a beat.
+    // Index calls mid hold — flight morph plume starts under fading pad FX; HUD still waits a beat.
     this._seamRevealed = true;
     this._seamSuppressFlame = false;
+    this._seamMorphT0 = this.t;
+    this._seamMorphDur = 0.55; // ease large pad-like plume → flight stub over ~0.55s
   };
 
   /* ---- input ---- */
@@ -1313,12 +1315,23 @@
     }
     // Single rocket in seam camera space — scale tracks camZoom continuously (still inside play clip)
     const seamHoldFlame = this.phase === "settle" && this._seamSuppressFlame;
-    // v6b: keep settle plume on after pad FX releases (full settle, not only first 55%)
+    // v6b5: settle plume morph — start near pad warm footprint, ease to flight size (no 16k→1.5k cliff)
     const thrusting = !seamHoldFlame && (this.phase === "climb" || this.phase === "pitch" || this.phase === "settle");
-    const plume = seamHoldFlame ? 0
+    let plume = seamHoldFlame ? 0
       : this.phase === "climb" ? CLIMB_PLUME
       : this.phase === "settle" ? ((this._seamPlume != null ? this._seamPlume : 0.9) * CLIMB_PLUME * (1 - 0.35 * clamp(this.phaseT / SETTLE_T, 0, 1)))
       : (1.4 + 0.6 * (1 - clamp(this.phaseT / PITCH_T, 0, 1)));
+    if (!seamHoldFlame && this._seamMorphT0 != null) {
+      const mu = clamp((this.t - this._seamMorphT0) / (this._seamMorphDur || 0.55), 0, 1);
+      const ease = mu * mu * (3 - 2 * mu); // smoothstep
+      this._seamMorphU = ease;
+      // ~4× length at morph start (pad-like), → 1× at end; survives brief settle→pitch overlap
+      if (this.phase === "settle" || (this.phase === "pitch" && ease < 0.999)) {
+        plume *= 1 + (1 - ease) * 3.2;
+      }
+    } else {
+      this._seamMorphU = (this.phase === "settle" && this._seamRevealed) ? 1 : 0;
+    }
     const sh = this._climbShake || 0;
     const rx = this.px + (sh ? Math.sin(this.t * 47) * sh : 0);
     const ry = this.py + (sh ? Math.cos(this.t * 53) * sh * 0.55 : 0);
@@ -1583,15 +1596,40 @@
     const ps = plumeScale || 1;
     const nos = (this.sp && this.sp.nozzles && this.sp.nozzles.length) ? this.sp.nozzles : [{ y: 0, s: 1 }];
     const fl = (Math.floor(this.t * 30) % 3);
+    // v6b5 morph: when plumeScale is boosted (pad hold→flight), draw tapered multi-lobe flame
+    // so warmPx stays continuous instead of snapping to a stub rectangle.
+    const morph = this._seamMorphT0 != null
+      ? (1 - clamp(this._seamMorphU != null ? this._seamMorphU : 0, 0, 1)) : 0;
+    const organic = morph > 0.05 || ps > 2.4;
     for (let i = 0; i < nos.length; i++) {
       const n = nos[i], y = n.y, sc = (n.s || 1) * ps;
-      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1);
+      const L = (26 + fl * 5) * sc * (ps > 1.5 ? 1.15 : 1) * (organic ? (1.15 + 0.55 * morph) : 1);
       const hw = Math.max(4, 6 * sc), hh = Math.max(3, 5 * sc);
-      x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw, L, hw * 2);
-      x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
-      x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
-      if (ps > 1.6) { // climb: white-hot core + longer tongue
-        x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
+      if (organic) {
+        // Tapered lobes + jittered edges (reads closer to pad cellular plume than a flat stub)
+        const lobes = 5 + (fl % 3);
+        const tipJ = ((Math.floor(this.t * 47 + i * 13) % 5) - 2) * (1.2 + 2 * morph);
+        for (let row = 0; row < lobes; row++) {
+          const u = row / (lobes - 1);
+          const yOff = (u - 0.5) * hw * (1.6 + 1.4 * morph);
+          const rowL = L * (1 - u * u * (0.55 + 0.25 * morph));
+          const rowW = Math.max(2, hw * (1.15 - 0.7 * u) * (1 + 0.35 * morph));
+          const x0 = tailX - rowL + tipJ * u;
+          x.fillStyle = u < 0.25 ? "#FFF8D0" : u < 0.45 ? "#FFDE40" : u < 0.7 ? "#FF8C1C" : "#D6301C";
+          x.fillRect(x0, y + yOff - rowW, rowL, rowW * 2);
+        }
+        // Outer flicker tongues
+        const tongue = L * (0.55 + 0.35 * morph);
+        x.fillStyle = "rgba(214,48,28,0.55)";
+        x.fillRect(tailX - tongue - 4, y - hw * (0.9 + 0.5 * morph), tongue * 0.35, hw * (1.8 + morph));
+        x.fillRect(tailX - tongue * 0.85, y + hw * 0.2, tongue * 0.4, hw * (1.2 + 0.6 * morph));
+      } else {
+        x.fillStyle = "#D6301C"; x.fillRect(tailX - L, y - hw, L, hw * 2);
+        x.fillStyle = "#FF8C1C"; x.fillRect(tailX - L * 0.72, y - hh, L * 0.72, hh * 2);
+        x.fillStyle = "#FFDE40"; x.fillRect(tailX - L * 0.42, y - Math.max(2, 3 * sc), L * 0.42, Math.max(4, 6 * sc));
+        if (ps > 1.6) {
+          x.fillStyle = "#FFF8D0"; x.fillRect(tailX - L * 0.22, y - 2 * sc, L * 0.22, 4 * sc);
+        }
       }
     }
   };
