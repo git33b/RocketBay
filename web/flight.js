@@ -777,7 +777,11 @@
   /* ---- autopilot (capture / perf runs only: ?bot=1 or capture API) ---- */
   P._botStep = function () {
     const b = this.bot;
-    if (this.phase === "tutorial") { this.dismissTutorial(); this._botHold = false; return; }
+    if (this.phase === "tutorial") {
+      // linger so first-flight overlay is visible; evidence/bots dismiss after ~1.4s
+      if (this.phaseT >= 1.4) this.dismissTutorial();
+      this._botHold = false; return;
+    }
     if (this.phase === "practice") {
       // gentle mid hold during practice
       this._botHold = this.py > 360 + 8; return;
