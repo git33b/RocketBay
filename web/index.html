@@ -13,7 +13,7 @@
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
-  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s6b3" />
+  <link rel="manifest" href="manifest.webmanifest?v=gp1-beta-s6b4" />
   <title>Launch Pad</title>
   <style>
     :root { color-scheme: dark; --accent: #ff8c00; --cyan: #00c8e0; }
@@ -413,10 +413,10 @@
   </div>
 
   <script src="pad-config.js?v=pad5v6"></script>
-  <script src="modular.js?v=gp1-beta-s6b3"></script>
-  <script src="audio.js?v=gp1-beta-s6b3"></script>
-  <script src="liftoff.js?v=gp1-beta-s6b3"></script>
-  <script src="flight.js?v=gp1-beta-s6b3"></script>
+  <script src="modular.js?v=gp1-beta-s6b4"></script>
+  <script src="audio.js?v=gp1-beta-s6b4"></script>
+  <script src="liftoff.js?v=gp1-beta-s6b4"></script>
+  <script src="flight.js?v=gp1-beta-s6b4"></script>
   <script>
     const _padAPI = window.RocketBayPadConfig || {};
     const NATIVE_W = _padAPI.NATIVE_W || 1280, NATIVE_H = _padAPI.NATIVE_H || 720;
@@ -424,7 +424,7 @@
     const PAD_VER = "pad5";
     // bh-lab channel (or ?lab=1): skip pad/climb, steel stack, early BH feel-test
     const LAB = /--bh-lab/i.test(location.hostname) || location.search.includes("lab=1") || new URLSearchParams(location.search).has("lab");
-    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6b3";
+    const APP_VER = LAB ? "bh1g-lab" : "gp1-beta-s6b4";
     const TIP_MIN_Y = 40;          // height budget: stack tip must stay at native y >= 40 at the plate's sit_y
     const MB = window.RocketBayModular;
 
@@ -1258,16 +1258,16 @@
       f.o.onHudReveal = () => { if (fromPadSeam) revealFlightChrome(); };
       if (fromPadSeam) {
         flDeploy.classList.remove("on"); flPause.classList.remove("on");
-        // v6b2: #flightCanvas is position:fixed;z-index:30 — that beats #world (transform
-        // stacking context at auto). Raise #world above flight for the overlap, keep flight at 25.
-        // Snap: drop world z-index and hide pad layers so flight owns the frame.
-        const stackEl = $("stack"), fxEl = $("fxCanvas"), worldEl = $("world");
+        // v6b4: #flightCanvas AND #stage are both position:fixed. Raising #world alone cannot
+        // beat flight (world z is trapped in #stage). Raise #stage above flight for the overlap.
+        // Snap: drop stage z, restore flight z=30 so flight owns the frame.
+        const stackEl = $("stack"), fxEl = $("fxCanvas"), stageEl = $("stage");
         const bumpZ = (el, z) => { if (el) { el.style.zIndex = z === "" ? "" : String(z); } };
-        bumpZ(worldEl, 40);          // whole pad scene above fixed flight
+        bumpZ(stageEl, 40);          // entire pad stage above fixed flight
         bumpZ(stackEl, 36); bumpZ(fxEl, 37);
-        try { if (liftoffEngine && liftoffEngine._seamLbEl) liftoffEngine._seamLbEl.style.zIndex = "38"; } catch (_) {}
+        try { if (liftoffEngine && liftoffEngine._seamLbEl) liftoffEngine._seamLbEl.style.zIndex = "45"; } catch (_) {}
         flCanvas.style.transition = "none";
-        flCanvas.style.zIndex = "25"; // under raised #world until snap
+        flCanvas.style.zIndex = "25"; // under raised #stage until snap
         flCanvas.style.opacity = "1"; // paints matched settle underneath pad
         let revealed = false;
         const ho = handoff || {};
@@ -1282,8 +1282,8 @@
             if (fxEl) { fxEl.style.display = "none"; fxEl.style.zIndex = ""; }
             try { if (liftoffEngine && liftoffEngine._hideSeamLetterbox) liftoffEngine._hideSeamLetterbox(); } catch (_) {}
             try { if (liftoffEngine && liftoffEngine.endLinger) liftoffEngine.endLinger(); } catch (_) {}
-            // Drop pad scene below flight, restore flight z — flight now owns the frame
-            bumpZ(worldEl, "");
+            // Drop pad stage below flight, restore flight z — flight now owns the frame
+            bumpZ(stageEl, "");
             bumpZ(stackEl, ""); bumpZ(fxEl, "");
             flCanvas.style.zIndex = "30";
             try { if (flight && flight.markSeamRevealed) flight.markSeamRevealed(); } catch (_) {}
