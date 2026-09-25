@@ -1624,7 +1624,7 @@
     this._paintFireBuf(field, pal);
     const ar = Math.max(1, field.activeRows || rows);
     this._flameLenCss = Math.min(lenCss, visRows);
-    try { global.__liftoffFlameDbg = { hullW: hullW, lenCss: lenCss, seedHalf: seedHalf, rows: ar, fw: fw, u: u }; } catch (_) {}
+    try { global.__liftoffFlameDbg = { hullW: hullW, lenCss: lenCss, seedHalf: seedHalf, rows: ar, fw: fw, u: u, phase: this.phase, z: zf, nozzleSY: nozzleScreenY, visRows: visRows, lenBase: lenBase, ignited: !!this.ignited, flame: this.flameIntensity, rocketY: this.rocketY }; } catch (_) {}
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -2238,6 +2238,7 @@
         global.__liftoffState = Object.assign({}, global.__liftoffState, {
           phase: "linger", climbT: this.climbT, zoom: this._zoom, seamLbA: this._seamLbA || 0,
           flame: this.flameIntensity, finished: true, running: true, lingerT: this._lingerT,
+          flameDbg: global.__liftoffFlameDbg || null,
         });
       } catch (_) {}
       // safety: auto-end linger after 1.2s if index never calls endLinger
