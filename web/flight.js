@@ -1,5 +1,5 @@
 /* RocketBay FLIGHT MODE v1 / gp1-beta (preview) / flight2d live / bh1g / gp1-d3 zone-vibrancy
- * GP1-BETA D3: unique planet set at depth + parallax nebula wash + ice-shard breakup (ice-hazard-variants).
+ * GP1-BETA D3: unique planet set at depth + soft radial nebula wash + ice-shard breakup (ice-hazard-variants).
  * GP1-BETA D2: coin pickup sparkle+trail; stronger shield oval + near-miss flash; settle streaks + ALT tick.
  * GP1-BETA D1: danger rim + hot tick on deadly hazards; decor planets never inherit rim.
  * GP1-BETA C2: cruise longer dual-layer exhaust + ~10° nose-up while thrusting (flight gameplay).
@@ -1547,27 +1547,36 @@
       }
       x.restore();
     }
-    // gp1-d3: parallax nebula depth wash — zone accent bands at far/mid rates (distinct palettes)
+    // gp1-d3: parallax nebula depth wash — soft radial blooms (far+mid), never muddy fillRect bars
     {
       const zWash = mod(Math.floor(this._artU() / SEG), 6);
       const ZW = ZONES[zWash] || ZONES[0];
+      const accent = ZW.accent || "#c492ff";
+      const bloom = (cx, cy, rx, ry, a) => {
+        const g = x.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
+        g.addColorStop(0, accent);
+        g.addColorStop(0.45, accent);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        x.globalAlpha = a;
+        x.fillStyle = g;
+        x.beginPath();
+        x.ellipse(Math.round(cx), Math.round(cy), Math.round(rx), Math.round(ry), 0, 0, Math.PI * 2);
+        x.fill();
+      };
       x.save();
-      x.fillStyle = ZW.accent;
-      // far wash (slower)
-      x.globalAlpha = NEBULA_WASH_A * 0.85;
-      const farOff = mod(cam * PAR.farPlanets * 0.35, VW + 280);
-      for (let i = 0; i < 4; i++) {
-        const bx = -farOff + i * 210;
-        const by = 36 + (i % 3) * 200 + Math.sin(cam * 0.008 + i * 1.7) * 28;
-        x.fillRect(Math.round(bx), Math.round(by), Math.round(VW * 0.42), 72 + (i % 2) * 28);
+      // far wash (slower parallax)
+      const farOff = mod(cam * PAR.farPlanets * 0.4, VW + 320);
+      for (let i = 0; i < 5; i++) {
+        const cx = -farOff + i * 190 + 90;
+        const cy = 70 + (i % 3) * 210 + Math.sin(cam * 0.007 + i * 1.3) * 36;
+        bloom(cx, cy, 130 + (i % 3) * 30, 52 + (i % 2) * 20, NEBULA_WASH_A * (0.55 + (i % 2) * 0.28));
       }
-      // mid wash (richer, slightly faster)
-      x.globalAlpha = NEBULA_WASH_A * 1.15;
-      const midOff = mod(cam * PAR.mid * 0.28, VW + 200);
-      for (let i = 0; i < 3; i++) {
-        const bx = VW * 0.15 - midOff + i * 260;
-        const by = WORLD_H - 160 - i * 150 + Math.cos(cam * 0.01 + i) * 22;
-        x.fillRect(Math.round(bx), Math.round(by), Math.round(VW * 0.5), 64 + i * 12);
+      // mid wash (slightly richer / faster)
+      const midOff = mod(cam * PAR.mid * 0.32, VW + 240);
+      for (let i = 0; i < 4; i++) {
+        const cx = VW * 0.18 - midOff + i * 220;
+        const cy = WORLD_H - 120 - i * 135 + Math.cos(cam * 0.009 + i) * 24;
+        bloom(cx, cy, 150 + i * 14, 46 + i * 8, NEBULA_WASH_A * (0.75 + (i % 2) * 0.22));
       }
       x.restore();
     }
